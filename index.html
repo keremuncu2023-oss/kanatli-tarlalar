@@ -113,8 +113,6 @@
 <script type="module">
 /* ============================================================
    FIREBASE AYARI
-   Firebase konsolundan aldığın config nesnesini aşağıya yapıştır.
-   Boş bırakırsan oyun tek kişilik TEST MODUNDA çalışır.
    ============================================================ */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBpk9IfRk2xMkwWZ420JaaJBpn-T3Wgu9M",
@@ -136,11 +134,34 @@ const CROPS = {
   cilek:   {ad:'Çilek',   em:'🍓', tohum:200, sure:7200e3,  fiyat:650, renk:'#e83a5a', kilit:30},
 };
 const CROP_IDS = Object.keys(CROPS);
+const ITEMS = {
+  gubre:{ad:'Gübre',         em:'🧪', acik:'Ekerken kullanılırsa ürün %40 daha hızlı büyür'},
+  tel:  {ad:'Çit teli',      em:'🪢', acik:'Tarlayı 6×6\'dan büyük genişletmek için'},
+  boru: {ad:'Sulama borusu', em:'🚰', acik:'Tarlayı 6×6\'dan büyük genişletmek için'},
+};
+const ITEM_IDS = Object.keys(ITEMS);
+const PLANES = {
+  c150:    {ad:'Hurda Cessna 150',     fiyat:1500,  menzil:150,  kap:10, yakit:80,   perKm:0.45, wear:1.6, start:{engine:55,airframe:60,inst:60}, tamir:5,  em:'🛩️', acik:'Eski, gürültülü, sık arıza yapar. Sadece yakın şehirlere gider.'},
+  c172:    {ad:'Cessna 172',           fiyat:9000,  menzil:450,  kap:25, yakit:180,  perKm:0.36, wear:1.0, start:{engine:85,airframe:85,inst:90}, tamir:10, em:'🛩️', acik:'Güvenilir, orta menzil. İzmir ve Ankara\'ya gider.'},
+  kingair: {ad:'Beechcraft King Air',  fiyat:45000, menzil:1300, kap:60, yakit:1400, perKm:0.95, wear:0.6, start:{engine:95,airframe:95,inst:95}, tamir:30, em:'✈️', acik:'Çift motorlu, hızlı, büyük yük. Her yere gider.'},
+};
+const CITIES = {
+  bursa:   {ad:'Bursa',   km:90,  kiyi:false, carp:1.3, talep:'havuc',   satar:{gubre:18, tel:45},          yakitCarp:1.3},
+  izmir:   {ad:'İzmir',   km:330, kiyi:true,  carp:1.5, talep:'domates', satar:{boru:80, tel:40, gubre:22}, yakitCarp:1.2},
+  ankara:  {ad:'Ankara',  km:350, kiyi:false, carp:1.6, talep:'bugday',  satar:{boru:70, gubre:20},         yakitCarp:1.1},
+  antalya: {ad:'Antalya', km:480, kiyi:true,  carp:1.8, talep:'cilek',   satar:{boru:65, tel:38},           yakitCarp:1.25},
+};
+const FUEL_PRICE = 1.5;
 const COLORS = ['#e2504c','#3d7fe0','#f2b134','#8e5bd8','#2fa86a','#ec6fb0','#20b5c4','#7a5233'];
-const MAX_W = 10, MAX_H = 8, MONEY_MAX_W = 6, MONEY_MAX_H = 6; // 6x6 sonrası şehirden malzeme gerekecek
-const START = () => ({money:50, w:3, h:3, plots:{}, seeds:{bugday:5}, crops:{}, plane:null});
-const expandCost = p => Math.round(60*Math.pow(1.5,(p.w-3)+(p.h-3))/10)*10;
-const nextSize = p => ((p.w-3) <= (p.h-3) && p.w < MAX_W) ? {w:p.w+1,h:p.h} : (p.h < MAX_H ? {w:p.w,h:p.h+1} : {w:p.w+1,h:p.h});
+const MAX_W = 10, MAX_H = 8, MONEY_MAX = 6; // 6x6 sonrası şehir malzemesi gerekir
+const LOT_UNLOCK = 6; // yeni arsa almak için tüm tarlalar en az 6x6
+const newFarm = lot => ({lot, w:3, h:3, plots:{}});
+const START = () => ({money:50, farms:[], seeds:{bugday:5}, crops:{}, items:{}, plane:null, trip:null});
+const expandCost = f => Math.round(60*Math.pow(1.5,(f.w-3)+(f.h-3))/10)*10;
+const expandMat = f => { const n=(f.w-3)+(f.h-3); return n>=6 ? {boru:n-4, tel:n-4} : null; };
+const nextSize = f => ((f.w-3) <= (f.h-3) && f.w < MAX_W) ? {w:f.w+1,h:f.h} : (f.h < MAX_H ? {w:f.w,h:f.h+1} : {w:f.w+1,h:f.h});
+const lotPrice = k => 5000*Math.pow(3,k-1); // k = sahip olunan tarla sayısı
+const cropDur = pl => CROPS[pl.c] ? CROPS[pl.c].sure*(pl.g?0.6:1) : 1;
 
 /* ---------------- Harita ---------------- */
 const T = 32, MW = 86, MH = 80;
@@ -159,35 +180,28 @@ const lotOrigin = n => { const p=lotPos(n); return {x:p.x+2, y:p.y+2}; };
 
 const MARKET = {x:32,y:12,w:9,h:5, door:{x:36.5,y:17.8}};
 const HANGAR = {x:58,y:12,w:7,h:5, door:{x:61.5,y:17.8}};
+const parkSpot = n => ({x:68.2+(n%4)*4.2, y:10.6+Math.floor(n/4)*1.95});
 
 (function buildMap(){
-  // Ana yollar
-  rect(2,22,MW-4,2,PATH);           // doğu-batı ana yol
-  rect(42,3,2,MH-5,PATH);           // kuzey-güney ana yol
+  rect(2,22,MW-4,2,PATH);
+  rect(42,3,2,MH-5,PATH);
   for(const y of [37,50,63,76]) rect(8,y,MW-16,2,PATH);
   rect(8,24,MW-16,2,PATH);
-  // Meydan
   rect(38,17,10,5,PLAZA);
-  // Gölet
   for(let y=5;y<16;y++)for(let x=3;x<15;x++){ const dx=(x-9)/6.2, dy=(y-10.5)/5.6; if(dx*dx+dy*dy<1) setT(x,y,WATER); }
-  // Pazar & hangar binaları
   rect(MARKET.x,MARKET.y,MARKET.w,MARKET.h,BLD);
   rect(MARKET.x+2,MARKET.y+MARKET.h,5,1,PLAZA); rect(MARKET.x+3,MARKET.y+MARKET.h+1,3,4,PLAZA);
   rect(HANGAR.x,HANGAR.y,HANGAR.w,HANGAR.h,BLD);
-  // Pist & taksi yolu
   rect(52,5,32,3,RUN);
-  rect(60,8,3,4,RUN); rect(58,17,7,2,RUN); rect(65,9,6,9,RUN); rect(44,19,14,2,PATH);
-  // Tarlalar (çitli arsalar)
+  rect(60,8,3,4,RUN); rect(58,17,7,2,RUN); rect(65,8,19,10,RUN); rect(44,19,14,2,PATH);
   for(let n=0;n<LOTS;n++){
     const p=lotPos(n);
     for(let y=p.y;y<p.y+LOT_H;y++)for(let x=p.x;x<p.x+LOT_W;x++){
       const edge = x===p.x||x===p.x+LOT_W-1||y===p.y||y===p.y+LOT_H-1;
       setT(x,y, edge?FENCE:LOT);
     }
-    // giriş kapıları (üst ve alt)
     setT(p.x+6,p.y,LOT); setT(p.x+7,p.y,LOT); setT(p.x+6,p.y+LOT_H-1,LOT); setT(p.x+7,p.y+LOT_H-1,LOT);
   }
-  // Ağaçlar & çiçekler
   for(let y=0;y<MH;y++)for(let x=0;x<MW;x++){
     if(x<2||y<2||x>=MW-2||y>=MH-2){ if(getT(x,y)===G||getT(x,y)===PATH) setT(x,y,TREE); continue; }
     if(getT(x,y)!==G) continue;
@@ -196,40 +210,61 @@ const HANGAR = {x:58,y:12,w:7,h:5, door:{x:61.5,y:17.8}};
     if(!nearRoad && r<(y<22?0.10:0.05)) setT(x,y,TREE);
     else if(r>0.965) setT(x,y,FLOWER);
   }
-  // Pazar önünü açık tut
   rect(30,18,13,4,G); rect(MARKET.x+2,MARKET.y+MARKET.h,5,1,PLAZA); rect(MARKET.x+3,MARKET.y+MARKET.h+1,3,4,PLAZA);
 })();
 
 /* ---------------- Durum ---------------- */
 const S = {
-  online:false, uid:null, me:null, name:'', color:COLORS[0], lot:0,
-  x:43, y:21, dir:0, moving:false, sel:'bugday',
-  others:new Map(),      // uid -> canlı oyuncu (konum)
-  players:{},            // uid -> kayıtlı oyuncu (tarla)
-  timeOffset:0,
+  online:false, uid:null, me:null, name:'', color:COLORS[0],
+  x:43, y:21, dir:0, moving:false, sel:'bugday', useGubre:false, loadCargo:true,
+  mode:'village', status:'',
+  others:new Map(), players:{}, timeOffset:0,
 };
 const now = ()=> Date.now()+S.timeOffset;
-let FB = null; // Firebase fonksiyonları
+let FB = null;
 
 /* ---------------- Yardımcılar ---------------- */
 const $ = id=>document.getElementById(id);
-const fmtMoney = n => n.toLocaleString('tr-TR');
+const fmtMoney = n => Math.round(n).toLocaleString('tr-TR');
 function fmtTime(ms){ ms=Math.max(0,ms); const s=Math.ceil(ms/1000); if(s<60) return s+' sn'; const m=Math.floor(s/60); if(m<60) return m+' dk '+(s%60? (s%60)+' sn':''); const h=Math.floor(m/60); return h+' sa '+(m%60)+' dk'; }
-let toastT=0; function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),1800); }
+let toastT=0; function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),2200); }
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const plotCount = p => p ? p.w*p.h : 0;
-const plantedCount = p => p&&p.plots ? Object.keys(p.plots).length : 0;
+const objVals = o => !o ? [] : (Array.isArray(o) ? o.filter(Boolean) : Object.values(o));
+// Kayıtlı veriyi tarlalar listesine çevir (eski kayıtlarla uyumlu)
+function farmsOf(p){
+  if(!p) return [];
+  if(p.farms) return p.farms;
+  const out=[];
+  if(p.lot!=null && p.lot>=0) out.push({lot:p.lot, w:p.w||3, h:p.h||3, plots:p.plots||{}});
+  for(const f of objVals(p.ek)) out.push({lot:f.lot, w:f.w||3, h:f.h||3, plots:f.plots||{}});
+  return out;
+}
+const plotCount = p => farmsOf(p).reduce((a,f)=>a+f.w*f.h,0);
+const plantedCount = p => farmsOf(p).reduce((a,f)=>a+Object.keys(f.plots||{}).length,0);
+function loadMe(d){
+  const me = {...START(), ...d};
+  me.farms = farmsOf(d).map(f=>({...f, plots:{...(f.plots||{})}}));
+  me.seeds = {...(d.seeds||{})}; me.crops = {...(d.crops||{})}; me.items = {...(d.items||{})};
+  me.plane = d.plane ? {...d.plane, cond:{...d.plane.cond}} : null;
+  me.trip = d.trip || null;
+  if(me.trip && me.trip.cargo){ me.trip.cargo = {crops:{...(me.trip.cargo.crops||{})}, items:{...(me.trip.cargo.items||{})}}; }
+  delete me.lot; delete me.w; delete me.h; delete me.plots; delete me.ek;
+  return me;
+}
 
 /* ---------------- Kayıt ---------------- */
 let saveTimer=0;
-function saveSoon(){
-  clearTimeout(saveTimer);
-  saveTimer=setTimeout(saveNow,400);
-  renderHUD();
+function saveSoon(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400); renderHUD(); }
+function serialize(){
+  const me=S.me, f0=me.farms[0]||{lot:-1,w:0,h:0,plots:{}};
+  return {name:S.name, color:S.color, money:Math.max(0,Math.round(me.money)),
+    lot:f0.lot, w:f0.w, h:f0.h, plots:f0.plots, ek:me.farms.slice(1),
+    seeds:me.seeds, crops:me.crops, items:me.items, plane:me.plane||null, trip:me.trip||null, updated:Date.now()};
 }
 function saveNow(){
-  const data = {...S.me, name:S.name, color:S.color, lot:S.lot, updated:Date.now()};
-  if(S.online){ FB.set(FB.ref(FB.db,'players/'+S.uid), data).catch(e=>toast('Kaydedilemedi: '+e.code)); }
+  clearTimeout(saveTimer);
+  const data = serialize();
+  if(S.online){ FB.set(FB.ref(FB.db,'players/'+S.uid), data).catch(e=>toast('Kaydedilemedi: '+(e.code||e.message))); }
   else { try{ localStorage.setItem('tk_save', JSON.stringify(data)); }catch(e){} }
   S.players[S.uid] = data;
 }
@@ -237,8 +272,7 @@ function saveNow(){
 /* ---------------- Firebase ---------------- */
 const hasConfig = !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey);
 $('modeInfo').innerHTML = hasConfig ? '🟢 Çevrimiçi mod: herkes aynı köyde.' : '🟡 Test modu: Firebase bağlı değil, tek kişilik.';
-
-let FBA = null; // auth fonksiyonları
+let FBA = null;
 async function loadFirebase(){
   const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
   const [app, auth, db] = await Promise.all([import(base+'firebase-app.js'), import(base+'firebase-auth.js'), import(base+'firebase-database.js')]);
@@ -247,44 +281,40 @@ async function loadFirebase(){
   FB = {...db, db:db.getDatabase(fbApp)};
 }
 function firstAuthState(){ return new Promise(res=>{ const off = FBA.onAuthStateChanged(FBA.a, u=>{ off(); res(u); }); }); }
-// Kullanıcı adını Firebase'in istediği e-posta biçimine çevir (oyuncu bunu görmez)
-const TRMAP = {'ç':'c','ğ':'g','ı':'i','i̇':'i','ö':'o','ş':'s','ü':'u'};
+const TRMAP = {'ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u'};
 function nickKey(n){ return n.toLocaleLowerCase('tr-TR').replace(/[çğıöşü]/g,c=>TRMAP[c]).replace(/[^a-z0-9_]/g,''); }
 const nickEmail = n => nickKey(n)+'@'+(FIREBASE_CONFIG.authDomain||'oyun.local');
 
-async function enterOnline(user, fresh){
+async function enterOnline(user){
   S.uid = user.uid; S.online = true;
   FB.onValue(FB.ref(FB.db,'.info/serverTimeOffset'), s=>{ S.timeOffset = s.val()||0; });
-
-  // Kayıtlı oyuncu var mı?
   const snap = await FB.get(FB.ref(FB.db,'players/'+S.uid));
   if(snap.exists()){
-    const d=snap.val(); S.me = {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}}; S.lot = d.lot;
+    const d=snap.val(); S.me = loadMe(d);
     S.name = d.name || S.name; S.color = d.color || S.color;
   } else {
-    S.lot = await claimLot();
-    if(S.lot<0) throw new Error('Köy dolu! Şu an boş arsa yok.');
     S.me = START();
     if(!S.name) S.name = (user.email||'oyuncu').split('@')[0];
   }
+  if(!S.me.farms.length){
+    const n = await claimAnyLot();
+    if(n<0) throw new Error('Köy dolu! Şu an boş arsa yok.');
+    S.me.farms.push(newFarm(n));
+  }
   saveNow();
-
-  // Tüm oyuncuların tarlaları
   FB.onValue(FB.ref(FB.db,'players'), s=>{
     const all = s.val()||{};
     for(const id in all){ if(id!==S.uid) S.players[id]=all[id]; }
     for(const id in S.players){ if(id!==S.uid && !all[id]) delete S.players[id]; }
     if($('panel').dataset.kind==='board') openBoard();
   });
-
-  // Canlı konumlar
   const pres = FB.ref(FB.db,'presence');
   const upd = s=>{
     if(s.key===S.uid) return;
     const v=s.val(); if(!v) return;
     let o=S.others.get(s.key);
     if(!o){ o={x:v.x,y:v.y,msgShown:0}; S.others.set(s.key,o); if(v.mt && Date.now()-v.mt>8000) o.msgShown=v.mt; }
-    o.tx=v.x; o.ty=v.y; o.name=v.n; o.color=v.c; o.dir=v.d; o.moving=!!v.m; o.t=v.t;
+    o.tx=v.x; o.ty=v.y; o.name=v.n; o.color=v.c; o.dir=v.d; o.moving=!!v.m; o.t=v.t; o.st=v.st||'';
     if(v.mt && v.mt!==o.msgShown){ o.msg=v.msg; o.msgShown=v.mt; o.msgLocal=performance.now(); addChatLog(v.n, v.msg); }
   };
   FB.onChildAdded(pres, upd);
@@ -294,19 +324,19 @@ async function enterOnline(user, fresh){
   FB.onDisconnect(myPres).remove();
   FB.onValue(FB.ref(FB.db,'.info/connected'), s=>{ if(s.val()){ FB.onDisconnect(myPres).remove(); sendPresence(true); } });
 }
-
 async function logout(){
   if(!S.online){ location.reload(); return; }
   try{ await FB.remove(FB.ref(FB.db,'presence/'+S.uid)); }catch(e){}
   await FBA.signOut(FBA.a);
   location.reload();
 }
-
-async function claimLot(){
-  for(let n=0;n<LOTS;n++){
-    const r = await FB.runTransaction(FB.ref(FB.db,'lots/'+n), cur => (cur===null||cur===S.uid) ? S.uid : undefined);
-    if(r.committed && r.snapshot.val()===S.uid) return n;
-  }
+async function claimLot(n){
+  if(!S.online){ return lotInfo()[n] ? false : true; }
+  const r = await FB.runTransaction(FB.ref(FB.db,'lots/'+n), cur => (cur===null||cur===S.uid) ? S.uid : undefined);
+  return r.committed && r.snapshot.val()===S.uid;
+}
+async function claimAnyLot(){
+  for(let n=0;n<LOTS;n++){ if(await claimLot(n)) return n; }
   return -1;
 }
 
@@ -315,18 +345,28 @@ function sendPresence(force){
   if(!S.online) return;
   const t=performance.now();
   if(!force && t-lastPres<150) return;
-  const key = `${S.x.toFixed(2)},${S.y.toFixed(2)},${S.dir},${S.moving}`;
+  const key = `${S.x.toFixed(2)},${S.y.toFixed(2)},${S.dir},${S.moving},${S.status}`;
   if(!force && key===lastSent && t-lastPres<10000) return;
   lastPres=t; lastSent=key;
-  FB.set(FB.ref(FB.db,'presence/'+S.uid), {n:S.name, c:S.color, x:+S.x.toFixed(2), y:+S.y.toFixed(2), d:S.dir, m:S.moving?1:0, t:FB.serverTimestamp(), msg:myMsg, mt:myMsgT}).catch(()=>{});
+  FB.set(FB.ref(FB.db,'presence/'+S.uid), {n:S.name, c:S.color, x:+S.x.toFixed(2), y:+S.y.toFixed(2), d:S.dir, m:S.moving?1:0, t:FB.serverTimestamp(), msg:myMsg, mt:myMsgT, st:S.status||''}).catch(()=>{});
 }
 
 /* ---------------- Giriş ekranı ---------------- */
+function homePos(){ const f=S.me.farms[0]; const o=lotOrigin(f?f.lot:0); return {x:o.x+4.5, y:o.y-1.3}; }
 function startGame(){
-  const o=lotOrigin(S.lot); S.x=o.x+4.5; S.y=o.y-1.3;
+  const h=homePos(); S.x=h.x; S.y=h.y;
   $('login').classList.remove('on');
+  // yarım kalan uçuş?
+  const tr=S.me.trip;
+  if(tr && tr.flying){
+    if(tr.from==='koy'){ unloadCargo(tr.cargo); S.me.trip=null; }
+    else S.me.trip={at:tr.from, cargo:tr.cargo};
+    toast('Uçuşun yarıda kaldı — kalkış noktasına döndün');
+    saveNow();
+  }
   renderHUD(); loop.started || requestAnimationFrame(loop);
-  toast(S.online?'Köye hoş geldin, '+S.name+'!':'Test modu: tek kişilik');
+  if(S.me.trip && S.me.trip.at){ enterCity(); }
+  else toast(S.online?'Köye hoş geldin, '+S.name+'!':'Test modu: tek kişilik');
 }
 const AUTH_ERR = {
   'auth/email-already-in-use':'Bu kullanıcı adı alınmış, başka bir tane dene',
@@ -352,32 +392,30 @@ const AUTH_ERR = {
     $('colorWrap').style.display = m==='signup'?'block':'none';
     $('pwIn').autocomplete = m==='signup'?'new-password':'current-password';
     playBtn.textContent = m==='signup'?'Hesap aç ve oyna':'Giriş yap';
-    $('authHint').textContent = m==='signup'?'Şifreni unutma: aynı ad ve şifreyle telefondan da bilgisayardan da girersin.':'';
+    $('authHint').textContent = m==='signup'?'İlk tarlan bedava! Şifreni unutma: aynı ad ve şifreyle telefondan da bilgisayardan da girersin.':'';
   };
   $('authTabs').onclick=e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.m); };
   const show=id=>{ for(const x of ['loading','authBox','welcomeBox']) $(x).style.display = x===id?'block':'none'; };
 
   if(!hasConfig){
-    // Test modu: sadece isim
     show('authBox'); $('authTabs').style.display='none'; $('pwWrap').style.display='none'; $('colorWrap').style.display='block';
     playBtn.textContent='Oyna (test)';
     playBtn.onclick=()=>{
       const name=$('nameIn').value.trim(); if(name.length<2){ toast('Adın en az 2 harf olsun'); return; }
       S.name=name; S.uid='local';
       let d=null; try{ d=JSON.parse(localStorage.getItem('tk_save')||'null'); }catch(e){}
-      S.me = d ? {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}} : START();
-      S.lot=0; saveNow(); startGame();
+      S.me = d ? loadMe(d) : START();
+      if(!S.me.farms.length) S.me.farms.push(newFarm(0));
+      saveNow(); startGame();
     };
     return;
   }
-
   const go = async (fn)=>{
     const old=playBtn.textContent; playBtn.disabled=true; $('wPlay').disabled=true; playBtn.textContent='Bağlanıyor…';
     try{ await fn(); startGame(); }
     catch(e){ console.error(e); toast(AUTH_ERR[e.code] || ('Hata: '+(e.message||e.code||e))); playBtn.textContent=old; }
     playBtn.disabled=false; $('wPlay').disabled=false;
   };
-
   playBtn.onclick=()=>go(async()=>{
     const name=$('nameIn').value.trim(), pw=$('pwIn').value;
     if(!/^[A-Za-z0-9_ÇĞİÖŞÜçğıöşü]{3,14}$/.test(name)) throw {code:'x',message:'Kullanıcı adı 3–14 harf/rakam olmalı (boşluk yok)'};
@@ -385,17 +423,15 @@ const AUTH_ERR = {
     if(mode==='signup'){
       if(pw!==$('pw2In').value) throw {code:'x',message:'Şifreler aynı değil'};
       const cred = await FBA.createUserWithEmailAndPassword(FBA.a, nickEmail(name), pw);
-      S.name=name; await enterOnline(cred.user, true);
+      S.name=name; await enterOnline(cred.user);
     } else {
       const cred = await FBA.signInWithEmailAndPassword(FBA.a, nickEmail(name), pw);
-      S.name=''; await enterOnline(cred.user, false);
+      S.name=''; await enterOnline(cred.user);
     }
   });
   const onEnter=e=>{ if(e.key==='Enter') playBtn.click(); };
   $('nameIn').addEventListener('keydown',onEnter); $('pwIn').addEventListener('keydown',onEnter); $('pw2In').addEventListener('keydown',onEnter);
   $('wOut').onclick=async()=>{ await FBA.signOut(FBA.a); show('authBox'); };
-
-  // Açılışta: Firebase'i yükle, kayıtlı oturum var mı bak
   (async()=>{
     try{
       await loadFirebase();
@@ -404,7 +440,7 @@ const AUTH_ERR = {
         let nm=(u.email||'').split('@')[0];
         try{ const s=await FB.get(FB.ref(FB.db,'players/'+u.uid+'/name')); if(s.exists()) nm=s.val(); }catch(e){}
         $('wName').textContent=nm; show('welcomeBox');
-        $('wPlay').onclick=()=>go(()=>enterOnline(u,false));
+        $('wPlay').onclick=()=>go(()=>enterOnline(u));
       } else {
         if(u && u.isAnonymous) await FBA.signOut(FBA.a);
         show('authBox'); setMode('login');
@@ -417,12 +453,15 @@ const AUTH_ERR = {
 function unlocked(id){ return plotCount(S.me) >= CROPS[id].kilit; }
 function renderHUD(){
   if(!S.me) return;
-  $('money').textContent = '💰 '+fmtMoney(S.me.money);
-  $('size').innerHTML = '🟫 '+plotCount(S.me)+'<span class="wide"> parsel</span>';
+  const me=S.me;
+  $('money').textContent = '💰 '+fmtMoney(me.money);
+  $('size').innerHTML = '🟫 '+plotCount(me)+'<span class="wide"> parsel</span>';
   const hb=$('hotbar'); hb.innerHTML='';
+  const vis = S.mode==='village';
+  $('hotbar').style.display = vis?'flex':'none';
   for(const id of CROP_IDS){
-    if(!unlocked(id) && !(S.me.seeds[id]>0)) continue;
-    const n=S.me.seeds[id]||0;
+    if(!unlocked(id) && !(me.seeds[id]>0)) continue;
+    const n=me.seeds[id]||0;
     const d=document.createElement('div');
     d.className='slot'+(S.sel===id?' sel':'')+(n?'':' empty');
     d.innerHTML=`${CROPS[id].em}<small>${n}</small>`;
@@ -430,10 +469,18 @@ function renderHUD(){
     d.onclick=()=>{ S.sel=id; renderHUD(); toast(CROPS[id].ad+' seçildi'); };
     hb.appendChild(d);
   }
-  const b=document.createElement('div'); b.className='slot'; b.innerHTML='🧺<small>'+Object.values(S.me.crops).reduce((a,b)=>a+b,0)+'</small>'; b.title='Sepet (ürünler)';
+  if((me.items.gubre||0)>0){
+    const d=document.createElement('div'); d.className='slot'+(S.useGubre?' sel':''); d.innerHTML=`🧪<small>${me.items.gubre}</small>`; d.title='Gübre kullan (aç/kapat)';
+    d.onclick=()=>{ S.useGubre=!S.useGubre; renderHUD(); toast(S.useGubre?'Gübre açık: ekinler %40 hızlı büyür':'Gübre kapalı'); }; hb.appendChild(d);
+  }
+  const b=document.createElement('div'); b.className='slot'; b.innerHTML='🎒<small>'+(Object.values(me.crops).reduce((a,b)=>a+b,0)+Object.values(me.items).reduce((a,b)=>a+b,0))+'</small>'; b.title='Çanta';
   b.onclick=()=>toast(sepetText()); hb.appendChild(b);
 }
-function sepetText(){ const parts=CROP_IDS.filter(i=>S.me.crops[i]>0).map(i=>CROPS[i].em+' '+S.me.crops[i]); return parts.length?'Sepet: '+parts.join('  ')+' — Pazar\'da sat':'Sepetin boş'; }
+function sepetText(){
+  const me=S.me;
+  const parts=CROP_IDS.filter(i=>me.crops[i]>0).map(i=>CROPS[i].em+' '+me.crops[i]).concat(ITEM_IDS.filter(i=>me.items[i]>0).map(i=>ITEMS[i].em+' '+me.items[i]));
+  return parts.length?'Çanta: '+parts.join('  '):'Çantan boş';
+}
 
 /* ---------------- Tarla mantığı ---------------- */
 function plotFromTile(tx,ty){
@@ -444,35 +491,68 @@ function plotFromTile(tx,ty){
   }
   return null;
 }
-function ownerOfLot(n){ for(const id in S.players){ if(S.players[id] && S.players[id].lot===n) return id; } return null; }
-function cropStage(pl){ const c=CROPS[pl.c]; if(!c) return 0; const p=(now()-pl.t)/c.sure; return p>=1?3:(p>0.5?2:(p>0.15?1:0)); }
+function lotAtTile(tx,ty){ for(let n=0;n<LOTS;n++){ const p=lotPos(n); if(tx>=p.x&&tx<p.x+LOT_W&&ty>=p.y&&ty<p.y+LOT_H) return n; } return -1; }
+// her arsa kime ait? {uid, farm, p}
+function lotInfo(){
+  const m={};
+  for(const id in S.players){
+    const p = id===S.uid ? S.me : S.players[id]; if(!p) continue;
+    for(const f of farmsOf(p)) if(f.lot>=0 && f.lot<LOTS) m[f.lot]={uid:id, farm:f, p};
+  }
+  return m;
+}
+function myFarm(n){ return S.me.farms.find(f=>f.lot===n); }
+function cropStage(pl){ const p=(now()-pl.t)/cropDur(pl); return p>=1?3:(p>0.5?2:(p>0.15?1:0)); }
 
-function actPlot(px,py){
-  const me=S.me;
-  if(px>=me.w||py>=me.h){ toast('Bu kısım henüz senin değil — Pazar\'dan arazi al'); return; }
-  const k=px+'_'+py, pl=me.plots[k];
+function actPlot(n,px,py){
+  const me=S.me, f=myFarm(n); if(!f) return;
+  if(px>=f.w||py>=f.h){ toast('Bu kısım henüz açılmadı — Pazar\'dan arazi genişlet'); return; }
+  const k=px+'_'+py, pl=f.plots[k];
   if(!pl){
     const id=S.sel;
     if(!unlocked(id)){ toast(CROPS[id].ad+' için '+CROPS[id].kilit+' parsel lazım'); return; }
     if(!(me.seeds[id]>0)){ toast(CROPS[id].ad+' tohumun yok — Pazar\'dan al'); return; }
-    me.seeds[id]--; me.plots[k]={c:id,t:now()};
-    puff(px,py,'#8b5a2b'); saveSoon(); return;
+    me.seeds[id]--;
+    const np={c:id,t:now()};
+    if(S.useGubre && me.items.gubre>0){ me.items.gubre--; np.g=1; if(!me.items.gubre) S.useGubre=false; }
+    f.plots[k]=np;
+    puff(n,px,py,'#8b5a2b'); saveSoon(); return;
   }
-  const c=CROPS[pl.c], left=pl.t+c.sure-now();
-  if(left>0){ toast(c.em+' '+c.ad+': '+fmtTime(left)+' kaldı'); return; }
-  delete me.plots[k];
+  const c=CROPS[pl.c], left=pl.t+cropDur(pl)-now();
+  if(left>0){ toast(c.em+' '+c.ad+': '+fmtTime(left)+' kaldı'+(pl.g?' 🧪':'')); return; }
+  delete f.plots[k];
   me.crops[pl.c]=(me.crops[pl.c]||0)+1;
-  puff(px,py,c.renk); floatText(px,py,'+1 '+c.em); saveSoon();
+  puff(n,px,py,c.renk); floatText(n,px,py,'+1 '+c.em); saveSoon();
+}
+function canBuyLot(){ return S.me.farms.every(f=>f.w>=LOT_UNLOCK && f.h>=LOT_UNLOCK); }
+async function buyLot(n){
+  const me=S.me, price=lotPrice(me.farms.length);
+  if(lotInfo()[n]){ toast('Bu arsa satılmış'); return; }
+  if(!canBuyLot()){ toast('Önce tüm tarlalarını en az 6×6 yap'); return; }
+  if(me.money<price){ toast('Paran yetmiyor (💰'+fmtMoney(price)+')'); return; }
+  const ok = await claimLot(n);
+  if(!ok){ toast('Bu arsayı başkası kaptı!'); return; }
+  me.money-=price; me.farms.push(newFarm(n)); saveNow(); renderHUD(); closePanel();
+  toast('🎉 Yeni tarla senin! Arsa '+(n+1));
+}
+function openLotSale(n){
+  const me=S.me, price=lotPrice(me.farms.length), ok=canBuyLot();
+  openPanel('lot','🏷️ Satılık arsa',`
+    <p>Bu arsayı alırsan yeni bir 3×3 tarla açılır ve onu da büyütebilirsin. Zenginlik sıralamasında bütün tarlaların toplamı sayılır.</p>
+    <div class="row"><span class="em">🏷️</span><div class="grow"><b>Fiyat: 💰${fmtMoney(price)}</b><div class="muted">${me.farms.length}. tarlandan sonra fiyat artar</div></div>
+    <button class="btn primary" data-buylot="${n}" ${ok&&me.money>=price?'':'disabled'}>Satın al</button></div>
+    ${ok?'':'<p class="muted">🔒 Önce sahip olduğun her tarlayı en az 6×6 yapmalısın.</p>'}`);
 }
 
 /* ---------------- Paneller ---------------- */
 const panel=$('panel');
-function openPanel(kind,title,html){ panel.dataset.kind=kind; $('pTitle').textContent=title; $('pBody').innerHTML=html; panel.classList.add('on'); }
-function closePanel(){ panel.classList.remove('on'); panel.dataset.kind=''; }
+function openPanel(kind,title,html,locked){ panel.dataset.kind=kind; $('pTitle').textContent=title; $('pBody').innerHTML=html; $('pClose').style.display=locked?'none':''; panel.classList.add('on'); }
+function closePanel(){ if(panel.dataset.kind==='city') return; panel.classList.remove('on'); panel.dataset.kind=''; }
 $('pClose').onclick=closePanel;
 panel.addEventListener('pointerdown',e=>{ if(e.target===panel) closePanel(); });
 
 let shopTab='sat';
+function cropPrice(id, city){ const c=CROPS[id]; if(!city) return c.fiyat; const C=CITIES[city]; return Math.round(c.fiyat*C.carp*(C.talep===id?1.6:1)); }
 function openShop(tab){
   if(tab) shopTab=tab;
   const me=S.me;
@@ -482,61 +562,251 @@ function openShop(tab){
     let any=false;
     for(const id of CROP_IDS){ const n=me.crops[id]||0; if(!n) continue; any=true; const c=CROPS[id];
       h+=`<div class="row"><span class="em">${c.em}</span><div class="grow"><b>${c.ad}</b> ×${n}<div class="muted">tanesi 💰${c.fiyat}</div></div><button class="btn" data-sell="${id}">Sat (${fmtMoney(n*c.fiyat)})</button></div>`; }
-    if(!any) h+='<p>Sepetin boş. Tarlana ekip hasat et, sonra burada sat.</p>';
-    else h+=`<button class="btn primary" style="width:100%;margin-top:8px" data-sell="*">Hepsini sat</button>`;
+    if(!any) h+='<p>Çantanda ürün yok. Tarlana ekip hasat et, sonra burada sat.</p>';
+    else h+=`<button class="btn primary" style="width:100%;margin-top:8px" data-sell="*">Hepsini sat</button><p class="muted">💡 Şehirlerde ürünler daha pahalıya satılır — uçağın varsa oraya götür!</p>`;
   } else if(shopTab==='tohum'){
     for(const id of CROP_IDS){ const c=CROPS[id]; const ok=unlocked(id);
       h+=`<div class="row"><span class="em">${c.em}</span><div class="grow"><b>${c.ad}</b> <span class="muted">(${me.seeds[id]||0} adet)</span><div class="muted">${ok?`Büyüme ${fmtTime(c.sure)} · satış 💰${c.fiyat}`:`🔒 ${c.kilit} parsel tarla gerekir`}</div></div>
       ${ok?`<button class="btn" data-buy="${id}" data-n="1">💰${c.tohum}</button><button class="btn" data-buy="${id}" data-n="5">×5</button>`:''}</div>`; }
   } else {
-    const cnt=plotCount(me);
-    h+=`<p>Tarlan: <b>${me.w}×${me.h} = ${cnt} parsel</b> (en çok ${MAX_W}×${MAX_H})</p>`;
-    if(me.w>=MAX_W && me.h>=MAX_H) h+='<p>Tarlan en büyük boyutta! 🎉</p>';
-    else {
-      const ns=nextSize(me);
-      if(ns.w>MONEY_MAX_W || ns.h>MONEY_MAX_H){
-        h+=`<div class="row"><span class="em">🔒</span><div class="grow"><b>${ns.w}×${ns.h}</b> için şehirden malzeme gerekiyor<div class="muted">Sulama borusu ve çit teli başka şehirlerde satılıyor. Uçaklar gelince açılacak ✈️</div></div></div>`;
-      } else {
-        const cost=expandCost(me);
-        h+=`<div class="row"><span class="em">🚜</span><div class="grow"><b>Genişlet → ${ns.w}×${ns.h}</b><div class="muted">+${ns.w*ns.h-cnt} parsel</div></div><button class="btn primary" data-expand>💰${fmtMoney(cost)}</button></div>`;
-      }
-    }
+    me.farms.forEach((f,i)=>{
+      h+=`<div class="row"><span class="em">🟫</span><div class="grow"><b>Tarla ${i+1}</b> — ${f.w}×${f.h} = ${f.w*f.h} parsel<div class="muted">Arsa ${f.lot+1}</div></div></div>`;
+      if(f.w>=MAX_W && f.h>=MAX_H){ h+='<p class="muted" style="margin:0 0 6px 44px">En büyük boyutta 🎉</p>'; return; }
+      const ns=nextSize(f), cost=expandCost(f), mat=expandMat(f);
+      const matOk = !mat || ((me.items.boru||0)>=mat.boru && (me.items.tel||0)>=mat.tel);
+      h+=`<div class="row" style="padding-left:44px"><div class="grow">Genişlet → <b>${ns.w}×${ns.h}</b> (+${ns.w*ns.h-f.w*f.h})
+        ${mat?`<div class="muted">Gerekli: 🚰 ${mat.boru} boru (${me.items.boru||0} var) · 🪢 ${mat.tel} tel (${me.items.tel||0} var)<br>Bunlar şehirlerde satılır ✈️</div>`:''}</div>
+        <button class="btn primary" data-expand="${i}" ${me.money>=cost&&matOk?'':'disabled'}>💰${fmtMoney(cost)}</button></div>`;
+    });
+    h+=`<div class="row"><span class="em">🏷️</span><div class="grow"><b>Yeni arsa al</b><div class="muted">${canBuyLot()?`Köydeki boş bir arsaya git ve tabelasına dokun. Fiyat: 💰${fmtMoney(lotPrice(me.farms.length))}`:'Her tarlan en az 6×6 olunca yeni arsa alabilirsin.'}</div></div></div>`;
     h+=`<p class="muted">Kilitli ürünler: ${CROP_IDS.filter(i=>!unlocked(i)).map(i=>CROPS[i].em+' '+CROPS[i].kilit+' parsel').join(' · ')||'hepsi açık'}</p>`;
   }
   openPanel('shop','🛒 Köy Pazarı',h);
 }
 $('pBody').addEventListener('click',e=>{
-  const b=e.target.closest('button'); if(!b) return;
-  const me=S.me;
-  if(b.dataset.logout!==undefined){ logout(); return; }
-  if(b.dataset.tab){ openShop(b.dataset.tab); return; }
-  if(b.dataset.sell){
-    const ids = b.dataset.sell==='*'?CROP_IDS:[b.dataset.sell]; let gain=0;
+  const b=e.target.closest('button'); if(!b||b.disabled) return;
+  const me=S.me, d=b.dataset;
+  if(d.logout!==undefined){ logout(); return; }
+  if(d.tab){ openShop(d.tab); return; }
+  if(d.sell){
+    const ids = d.sell==='*'?CROP_IDS:[d.sell]; let gain=0;
     for(const id of ids){ const n=me.crops[id]||0; gain+=n*CROPS[id].fiyat; me.crops[id]=0; }
     me.money+=gain; if(gain) toast('+💰'+fmtMoney(gain)); saveSoon(); openShop(); return;
   }
-  if(b.dataset.buy){
-    const id=b.dataset.buy, n=+b.dataset.n, cost=CROPS[id].tohum*n;
+  if(d.buy){
+    const id=d.buy, n=+d.n, cost=CROPS[id].tohum*n;
     if(me.money<cost){ toast('Paran yetmiyor'); return; }
     me.money-=cost; me.seeds[id]=(me.seeds[id]||0)+n; S.sel=id; saveSoon(); openShop(); return;
   }
-  if(b.dataset.expand!==undefined){
-    const cost=expandCost(me); if(me.money<cost){ toast('Paran yetmiyor'); return; }
-    const ns=nextSize(me); me.money-=cost; me.w=ns.w; me.h=ns.h; toast('Tarlan büyüdü! 🎉 '+me.w+'×'+me.h); saveSoon(); openShop(); return;
+  if(d.expand!==undefined){
+    const f=me.farms[+d.expand], cost=expandCost(f), mat=expandMat(f);
+    if(me.money<cost){ toast('Paran yetmiyor'); return; }
+    if(mat){ if((me.items.boru||0)<mat.boru||(me.items.tel||0)<mat.tel){ toast('Malzeme eksik'); return; } me.items.boru-=mat.boru; me.items.tel-=mat.tel; }
+    const ns=nextSize(f); me.money-=cost; f.w=ns.w; f.h=ns.h; toast('Tarlan büyüdü! 🎉 '+f.w+'×'+f.h); saveSoon(); openShop(); return;
   }
+  if(d.buylot!==undefined){ buyLot(+d.buylot); return; }
+  // hangar
+  if(d.buyplane){ buyPlane(d.buyplane); return; }
+  if(d.repair){ repairPlane(d.repair, false); return; }
+  if(d.refuel!==undefined){ refuel(false); return; }
+  if(d.fly){ depart(d.fly); return; }
+  if(d.htab){ hangarTab=d.htab; openHangar(); return; }
+  if(d.cargo!==undefined){ S.loadCargo=!S.loadCargo; openHangar(); return; }
+  // şehir
+  if(d.ctab){ cityTab=d.ctab; openCityPanel(); return; }
+  if(d.csell){ citySell(d.csell); return; }
+  if(d.cbuy){ cityBuy(d.cbuy, +d.n); return; }
+  if(d.crefuel!==undefined){ refuel(true); return; }
+  if(d.crepair!==undefined){ repairPlane('engine', true); return; }
+  if(d.flyhome!==undefined){ depart('koy'); return; }
 });
+
+/* ---------------- Uçaklar ---------------- */
+let hangarTab='ucak';
+const condCol = v => v>66?'#2fa86a':(v>33?'#e8a33a':'#e2504c');
+const bar = (v,label)=>`<div style="display:flex;align-items:center;gap:8px;margin:3px 0"><span style="width:92px" class="muted">${label}</span><div style="flex:1;height:12px;border:2px solid #3b2a1a;border-radius:7px;overflow:hidden;background:#fff"><div style="height:100%;width:${Math.max(0,v)}%;background:${condCol(v)}"></div></div><b style="width:36px;text-align:right">${Math.round(v)}</b></div>`;
+const repairCost = (pl,part,city)=>{ const PD=PLANES[pl.model]; const mul={engine:1,airframe:0.8,inst:0.5}[part]; return Math.round((100-pl.cond[part])*PD.tamir*mul*(city?2.5:1)); };
 function openHangar(){
-  openPanel('hangar','✈️ Hangar',`
-    <div class="row"><span class="em">🛩️</span><div class="grow"><b>Eski Cessna 150</b><div class="muted">Hurda ama uçuyor… çoğu zaman. 2 kişilik, az yük.</div></div><button class="btn" disabled>💰1.500</button></div>
-    <p>Uçaklar bir sonraki güncellemede geliyor: diğer şehirlere 3D uçuş, kargo taşıma, arıza ve bakım.</p>
-    <p class="muted">Şimdilik para biriktir, tarlanı 6×6'ya kadar büyüt.</p>`);
+  const me=S.me, pl=me.plane;
+  let h='';
+  if(!pl){
+    h+='<p>Uçağın yok. Bir uçak al, şehirlere uç: ürünlerini pahalıya sat, tarlanı büyütecek malzemeleri getir.</p>';
+    for(const [id,P] of Object.entries(PLANES)){
+      h+=`<div class="row"><span class="em">${P.em}</span><div class="grow"><b>${P.ad}</b><div class="muted">${P.acik}<br>Menzil ${P.menzil} km · Yük ${P.kap} · Depo ${P.yakit} L</div></div><button class="btn ${me.money>=P.fiyat?'primary':''}" data-buyplane="${id}" ${me.money>=P.fiyat?'':'disabled'}>💰${fmtMoney(P.fiyat)}</button></div>`;
+    }
+    openPanel('hangar','✈️ Hangar',h); return;
+  }
+  const PD=PLANES[pl.model];
+  h+=`<div class="tabs"><button class="btn tab ${hangarTab==='ucak'?'on':''}" data-htab="ucak">Uçağım</button><button class="btn tab ${hangarTab==='uc'?'on':''}" data-htab="uc">Uçuş</button><button class="btn tab ${hangarTab==='degis'?'on':''}" data-htab="degis">Değiştir</button></div>`;
+  if(hangarTab==='ucak'){
+    h+=`<p style="margin:4px 0"><b>${PD.em} ${PD.ad}</b> <span class="muted">· ${Math.round(pl.hours||0)} uçuş</span></p>`;
+    h+=bar(pl.cond.engine,'🔧 Motor')+bar(pl.cond.airframe,'🛠️ Gövde')+bar(pl.cond.inst,'📟 Göstergeler');
+    h+=`<p class="muted" style="margin:4px 0 8px">Bakımsız uçakta uçuş sırasında arıza çıkar: motor teklemesi, motor durması, yakıt kaçağı, gösterge arızası…</p>`;
+    for(const part of ['engine','airframe','inst']){ const c=repairCost(pl,part,false); if(c>0) h+=`<div class="row"><div class="grow">${{engine:'Motor revizyonu',airframe:'Gövde tamiri',inst:'Gösterge kalibrasyonu'}[part]} (${Math.round(pl.cond[part])}→100)</div><button class="btn" data-repair="${part}" ${me.money>=c?'':'disabled'}>💰${fmtMoney(c)}</button></div>`; }
+    const need=PD.yakit-pl.fuel, fc=Math.ceil(need*FUEL_PRICE);
+    h+=`<div class="row"><div class="grow">⛽ Yakıt: <b>${Math.round(pl.fuel)} / ${PD.yakit} L</b></div>${need>0.5?`<button class="btn" data-refuel ${me.money>0?'':'disabled'}>Doldur 💰${fmtMoney(fc)}</button>`:'<span class="muted">Dolu</span>'}</div>`;
+  } else if(hangarTab==='uc'){
+    if(pl.cond.engine<=0){ h+='<p>🛑 Motor çalışmıyor. Önce motor revizyonu yaptır.</p>'; }
+    else {
+      const crops=Object.values(me.crops).reduce((a,b)=>a+b,0);
+      h+=`<div class="row"><div class="grow"><b>Ürünleri yükle</b><div class="muted">Çantadaki en değerli ${Math.min(crops,PD.kap)} ürün uçağa yüklenir (kapasite ${PD.kap}). Şehirde pahalıya satarsın.</div></div><button class="btn ${S.loadCargo?'primary':''}" data-cargo>${S.loadCargo?'Evet':'Hayır'}</button></div>`;
+      for(const [id,C] of Object.entries(CITIES)){
+        const fuelNeed=Math.ceil(C.km*PD.perKm*1.1);
+        const range = C.km<=PD.menzil, fuel = pl.fuel>=fuelNeed;
+        const why = !range?'🔒 Menzil yetmez — daha büyük uçak lazım':(!fuel?`⛽ ${fuelNeed} L yakıt lazım (${Math.round(pl.fuel)} var)`:`⛽ ~${fuelNeed} L yakar · ${C.talep?CROPS[C.talep].em+' '+CROPS[C.talep].ad+'a yüksek fiyat':''}`);
+        h+=`<div class="row"><span class="em">🏙️</span><div class="grow"><b>${C.ad}</b> <span class="muted">${C.km} km</span><div class="muted">${why}<br>Satar: ${Object.keys(C.satar).map(i=>ITEMS[i].em+' '+ITEMS[i].ad).join(', ')}</div></div><button class="btn ${range&&fuel?'primary':''}" data-fly="${id}" ${range&&fuel?'':'disabled'}>Kalkış</button></div>`;
+      }
+      h+=`<p class="muted">🎮 Kontroller: telefonda sağda kumanda kolu, solda gaz. Bilgisayarda W/S/A/D, R/F gaz, V flap.</p>`;
+    }
+  } else {
+    const trade=Math.round(PD.fiyat*0.5*(0.5+0.5*(pl.cond.engine+pl.cond.airframe)/200));
+    h+=`<p class="muted">Mevcut uçağını takasa verirsen 💰${fmtMoney(trade)} düşülür.</p>`;
+    for(const [id,P] of Object.entries(PLANES)){ if(id===pl.model) continue; const cost=Math.max(0,P.fiyat-trade);
+      h+=`<div class="row"><span class="em">${P.em}</span><div class="grow"><b>${P.ad}</b><div class="muted">${P.acik}<br>Menzil ${P.menzil} km · Yük ${P.kap}</div></div><button class="btn ${me.money>=cost?'primary':''}" data-buyplane="${id}" ${me.money>=cost?'':'disabled'}>💰${fmtMoney(cost)}</button></div>`; }
+  }
+  openPanel('hangar','✈️ Hangar',h);
 }
+function buyPlane(id){
+  const me=S.me, P=PLANES[id];
+  let cost=P.fiyat;
+  if(me.plane){ const PD=PLANES[me.plane.model]; cost=Math.max(0,P.fiyat-Math.round(PD.fiyat*0.5*(0.5+0.5*(me.plane.cond.engine+me.plane.cond.airframe)/200))); }
+  if(me.money<cost){ toast('Paran yetmiyor'); return; }
+  me.money-=cost; me.plane={model:id, cond:{...P.start}, fuel:Math.round(P.yakit*0.5), hours:0};
+  hangarTab='ucak'; saveSoon(); openHangar(); toast('🎉 '+P.ad+' artık senin! Apronda duruyor.');
+}
+function repairPlane(part, city){
+  const me=S.me, pl=me.plane;
+  if(city){ // şehirde acil tamir: motoru 35'e çıkar
+    const target=35, c=Math.round((target-pl.cond.engine)*PLANES[pl.model].tamir*2.5);
+    if(pl.cond.engine>=target) return; if(me.money<c){ toast('Paran yetmiyor'); return; }
+    me.money-=c; pl.cond.engine=target; saveSoon(); openCityPanel(); toast('Motor geçici olarak toparlandı'); return;
+  }
+  const c=repairCost(pl,part,false); if(me.money<c){ toast('Paran yetmiyor'); return; }
+  me.money-=c; pl.cond[part]=100; saveSoon(); openHangar(); toast('🔧 Tamir edildi');
+}
+function refuel(city){
+  const me=S.me, pl=me.plane, PD=PLANES[pl.model];
+  const price = FUEL_PRICE*(city?CITIES[me.trip.at].yakitCarp:1);
+  let liters = PD.yakit-pl.fuel; const affordable = Math.floor(me.money/price);
+  if(liters>affordable){
+    if(city){ // şehirde mahsur kalmasın: eve dönecek kadar yakıtı borçla ver
+      const need=Math.ceil(CITIES[me.trip.at].km*PD.perKm*1.1)-pl.fuel;
+      if(affordable<need){ pl.fuel+=Math.max(0,need); me.money=0; saveSoon(); openCityPanel(); toast('Paran yetmedi — belediye eve dönüş yakıtını verdi'); return; }
+    }
+    liters=affordable;
+  }
+  if(liters<=0){ toast('Paran yetmiyor'); return; }
+  pl.fuel+=liters; me.money-=liters*price; saveSoon(); city?openCityPanel():openHangar(); toast('⛽ +'+Math.round(liters)+' L');
+}
+function rollFailures(pl){
+  const f=[], e=pl.cond.engine, a=pl.cond.airframe, i=pl.cond.inst;
+  if(Math.random() < (100-e)/100*0.7) f.push({type: (e<35&&Math.random()<0.55)?'engine_out':'rough', at:35+Math.random()*80});
+  if(Math.random() < (100-a)/100*0.4) f.push({type:'fuel_leak', at:30+Math.random()*90});
+  if(Math.random() < (100-i)/100*0.6) f.push({type:Math.random()<0.5?'asi':'alt', at:20+Math.random()*100});
+  return f;
+}
+function unloadCargo(cg){ if(!cg) return; const me=S.me; for(const [k,v] of Object.entries(cg.crops||{})) me.crops[k]=(me.crops[k]||0)+v; for(const [k,v] of Object.entries(cg.items||{})) me.items[k]=(me.items[k]||0)+v; }
+const cargoCount = cg => !cg?0:Object.values(cg.crops||{}).reduce((a,b)=>a+b,0)+Object.values(cg.items||{}).reduce((a,b)=>a+b,0);
+function setVillageUI(on){ for(const id of ['topL','topR','hotbar','action','chatLog']) { const e=$(id); if(e) e.style.visibility=on?'visible':'hidden'; } }
+
+async function depart(toKey){
+  const me=S.me, pl=me.plane, PD=PLANES[pl.model];
+  const fromKey = (me.trip && me.trip.at) || 'koy';
+  const km = toKey==='koy' ? CITIES[fromKey].km : CITIES[toKey].km;
+  if(pl.cond.engine<=0){ toast('Motor çalışmıyor'); return; }
+  if(pl.fuel < km*PD.perKm*1.05){ toast('Yakıt yetmez'); return; }
+  let cargo;
+  if(fromKey==='koy'){
+    cargo={crops:{},items:{}};
+    if(S.loadCargo){ let space=PD.kap; const ids=CROP_IDS.slice().sort((a,b)=>CROPS[b].fiyat-CROPS[a].fiyat);
+      for(const id of ids){ const n=Math.min(me.crops[id]||0, space); if(n>0){ cargo.crops[id]=n; me.crops[id]-=n; space-=n; } } }
+  } else cargo = me.trip.cargo || {crops:{},items:{}};
+  const toName = toKey==='koy'?'Köy':CITIES[toKey].ad, fromName = fromKey==='koy'?'Köy':CITIES[fromKey].ad;
+  me.trip = {from:fromKey, to:toKey, flying:true, cargo};
+  S.mode='flight'; S.status='✈️ '+toName+' yolunda'; saveNow(); sendPresence(true);
+  panel.classList.remove('on'); panel.dataset.kind=''; setVillageUI(false);
+  const failures = rollFailures(pl);
+  const res = await startFlight({
+    model:pl.model, color:S.color, seed:Math.floor(Math.random()*1e6)+1,
+    from:{kind:fromKey==='koy'?'koy':'sehir', name:fromName}, to:{kind:toKey==='koy'?'koy':'sehir', name:toName, coastal:toKey!=='koy'&&CITIES[toKey].kiyi},
+    fuelL:pl.fuel, fuelCap:PD.yakit, perKm:PD.perKm, distKm:km, failures,
+  });
+  handleFlightResult(res, fromKey, toKey);
+}
+function handleFlightResult(res, fromKey, toKey){
+  const me=S.me, pl=me.plane, PD=PLANES[pl.model], cargo=me.trip.cargo;
+  pl.fuel = Math.max(0, res.fuelLeft);
+  if(res.tookOff){
+    pl.hours=(pl.hours||0)+1;
+    pl.cond.engine -= (2+Math.random()*3)*PD.wear; pl.cond.inst -= (1+Math.random()*2)*PD.wear; pl.cond.airframe -= PD.wear;
+  }
+  pl.cond.engine -= res.damage.engine||0; pl.cond.airframe -= res.damage.airframe||0; pl.cond.inst -= res.damage.inst||0;
+  for(const k in pl.cond) pl.cond[k]=Math.max(0,Math.min(100,pl.cond[k]));
+  let at, msg='';
+  const tow = Math.round(PD.fiyat*0.05);
+  switch(res.outcome){
+    case 'landed': at=toKey; break;
+    case 'forced': if(res.nearDest){ at=toKey; } else at=fromKey; me.money=Math.max(0,me.money-tow); msg='Çekici ücreti 💰'+fmtMoney(tow); break;
+    case 'crash': at=fromKey; me.money=Math.max(0,me.money-tow*2); cargo.crops={}; cargo.items={}; msg='Kaza! Çekici ücreti 💰'+fmtMoney(tow*2)+', yük kayboldu'; break;
+    default: at=fromKey;
+  }
+  if(at==='koy'){ unloadCargo(cargo); me.trip=null; S.mode='village'; S.status=''; }
+  else { me.trip={at, cargo}; }
+  saveNow(); setVillageUI(true);
+  if(me.trip){ enterCity(); }
+  else { const ps=parkSpot(me.farms[0].lot); S.x=HANGAR.door.x; S.y=HANGAR.door.y+0.6; renderHUD(); sendPresence(true); }
+  if(msg) toast(msg); else if(res.outcome==='landed' && at==='koy') toast('Köye döndün! Yük çantana aktarıldı 🎒');
+}
+
+/* ---------------- Şehir ---------------- */
+let cityTab='sat';
+function enterCity(){ S.mode='city'; S.status='📍 '+CITIES[S.me.trip.at].ad; sendPresence(true); renderHUD(); cityTab='sat'; openCityPanel(); }
+function openCityPanel(){
+  const me=S.me, C=CITIES[me.trip.at], pl=me.plane, PD=PLANES[pl.model], cg=me.trip.cargo, used=cargoCount(cg);
+  let h=`<p class="muted" style="margin:0 0 6px">Paran: <b>💰 ${fmtMoney(me.money)}</b> · Kargo: <b>${used}/${PD.kap}</b> · ⛽ ${Math.round(pl.fuel)} L</p>`;
+  h+=`<div class="tabs"><button class="btn tab ${cityTab==='sat'?'on':''}" data-ctab="sat">Sat</button><button class="btn tab ${cityTab==='al'?'on':''}" data-ctab="al">Al</button><button class="btn tab ${cityTab==='ucak'?'on':''}" data-ctab="ucak">Uçak</button></div>`;
+  if(cityTab==='sat'){
+    h+=`<p class="muted" style="margin:0">${C.ad} ürünleri köyden ×${C.carp} fiyata alıyor. ${CROPS[C.talep].em} ${CROPS[C.talep].ad} için ekstra talep var!</p>`;
+    let any=false;
+    for(const id of CROP_IDS){ const n=cg.crops[id]||0; if(!n) continue; any=true; const p=cropPrice(id,me.trip.at);
+      h+=`<div class="row"><span class="em">${CROPS[id].em}</span><div class="grow"><b>${CROPS[id].ad}</b> ×${n}<div class="muted">tanesi 💰${p} (köyde ${CROPS[id].fiyat})</div></div><button class="btn primary" data-csell="${id}">Sat (${fmtMoney(n*p)})</button></div>`; }
+    if(!any) h+='<p>Uçakta satılacak ürün yok.</p>';
+  } else if(cityTab==='al'){
+    for(const [id,price] of Object.entries(C.satar)){ const I=ITEMS[id];
+      h+=`<div class="row"><span class="em">${I.em}</span><div class="grow"><b>${I.ad}</b> <span class="muted">(uçakta ${cg.items[id]||0}, evde ${me.items[id]||0})</span><div class="muted">${I.acik}</div></div><button class="btn" data-cbuy="${id}" data-n="1">💰${price}</button><button class="btn" data-cbuy="${id}" data-n="5">×5</button></div>`; }
+    h+=`<p class="muted">Kargo kapasitesi: ${PD.kap - used} boş yer</p>`;
+  } else {
+    h+=bar(pl.cond.engine,'🔧 Motor')+bar(pl.cond.airframe,'🛠️ Gövde')+bar(pl.cond.inst,'📟 Göstergeler');
+    const price=FUEL_PRICE*C.yakitCarp, need=PD.yakit-pl.fuel;
+    h+=`<div class="row"><div class="grow">⛽ ${Math.round(pl.fuel)} / ${PD.yakit} L <span class="muted">(litresi 💰${price.toFixed(2)})</span></div>${need>0.5?`<button class="btn" data-crefuel>Doldur 💰${fmtMoney(Math.ceil(need*price))}</button>`:''}</div>`;
+    if(pl.cond.engine<35) h+=`<div class="row"><div class="grow">Acil motor tamiri (→35)<div class="muted">Asıl bakım köy hangarında yapılır</div></div><button class="btn" data-crepair>💰${fmtMoney(Math.round((35-pl.cond.engine)*PD.tamir*2.5))}</button></div>`;
+  }
+  const fuelNeed=Math.ceil(C.km*PD.perKm*1.05), canFly=pl.fuel>=fuelNeed && pl.cond.engine>0;
+  h+=`<button class="btn primary" style="width:100%;margin-top:12px;height:54px" data-flyhome ${canFly?'':'disabled'}>✈️ Köye dön (${C.km} km)</button>`;
+  if(!canFly) h+=`<p class="muted" style="text-align:center">${pl.cond.engine<=0?'Motor çalışmıyor — acil tamir yap':'Dönüş için ~'+fuelNeed+' L yakıt lazım — Uçak sekmesinden yakıt al'}</p>`;
+  openPanel('city','📍 '+C.ad+' Havalimanı',h,true);
+}
+function citySell(id){
+  const me=S.me, cg=me.trip.cargo, n=cg.crops[id]||0; if(!n) return;
+  const g=n*cropPrice(id,me.trip.at); me.money+=g; cg.crops[id]=0; toast('+💰'+fmtMoney(g)); saveSoon(); openCityPanel();
+}
+function cityBuy(id,n){
+  const me=S.me, C=CITIES[me.trip.at], cg=me.trip.cargo, PD=PLANES[me.plane.model];
+  const space=PD.kap-cargoCount(cg); n=Math.min(n,space);
+  if(n<=0){ toast('Uçak dolu!'); return; }
+  const cost=C.satar[id]*n; if(me.money<cost){ toast('Paran yetmiyor'); return; }
+  me.money-=cost; cg.items[id]=(cg.items[id]||0)+n; saveSoon(); openCityPanel();
+}
+
 function openBoard(){
-  const list = Object.entries(S.players).filter(([id,p])=>p&&p.name).map(([id,p])=>({id,p,score:plotCount(p),planted:plantedCount(p)}))
+  const list = Object.entries(S.players).filter(([id,p])=>p&&p.name).map(([id,p])=>({id,p:id===S.uid?S.me:p,score:plotCount(id===S.uid?S.me:p),planted:plantedCount(id===S.uid?S.me:p)}))
     .sort((a,b)=>b.score-a.score||b.planted-a.planted||(b.p.money||0)-(a.p.money||0));
-  let h='<p class="muted" style="margin-top:0">Zenginlik = tarla büyüklüğü</p>';
-  list.forEach((e,i)=>{ const on = e.id===S.uid || S.others.has(e.id);
-    h+=`<div class="row"><span class="em">${['🥇','🥈','🥉'][i]||(i+1)}</span><span class="sw" style="width:20px;height:20px;border-width:2px;background:${esc(e.p.color||'#999')}"></span><div class="grow"><b>${esc(e.p.name)}</b>${e.id===S.uid?' (sen)':''} ${on?'<span class="badge" style="background:#2fa86a">çevrimiçi</span>':''}<div class="muted">${e.p.w}×${e.p.h} · ekili ${e.planted}</div></div><b>${e.score} parsel</b></div>`; });
+  let h='<p class="muted" style="margin-top:0">Zenginlik = toplam tarla büyüklüğü</p>';
+  list.forEach((e,i)=>{ const o=S.others.get(e.id); const on = e.id===S.uid || !!o; const st = e.id===S.uid?S.status:(o&&o.st);
+    const nf=farmsOf(e.p).length, pl=e.p.plane;
+    const color = e.id===S.uid?S.color:e.p.color;
+    h+=`<div class="row"><span class="em">${['🥇','🥈','🥉'][i]||(i+1)}</span><span class="sw" style="width:20px;height:20px;border-width:2px;background:${esc(color||'#999')}"></span><div class="grow"><b>${esc(e.id===S.uid?S.name:e.p.name)}</b>${e.id===S.uid?' (sen)':''} ${on?'<span class="badge" style="background:#2fa86a">çevrimiçi</span>':''}
+      <div class="muted">${nf} tarla · ekili ${e.planted}${pl?' · '+PLANES[pl.model].em+' '+PLANES[pl.model].ad:''}${st?' · '+esc(st):''}</div></div><b>${e.score} parsel</b></div>`; });
   h+=`<p class="muted" style="margin:12px 0 4px">Hesap: <b>${esc(S.name)}</b></p><button class="btn" style="width:100%;font-size:15px" data-logout>🚪 Çıkış yap</button>`;
   openPanel('board','🏆 Zengin Çiftçiler',h);
 }
@@ -558,11 +828,12 @@ function sendChat(){
 $('chatSend').onclick=sendChat;
 $('chatIn').addEventListener('keydown',e=>{ if(e.key==='Enter') sendChat(); if(e.key==='Escape'){ $('chatBar').classList.remove('on'); $('chatIn').blur(); } e.stopPropagation(); });
 $('bBoard').onclick=openBoard;
-$('bHome').onclick=()=>{ const o=lotOrigin(S.lot); S.x=o.x+4.5; S.y=o.y-1.3; toast('Tarlana döndün 🏠'); sendPresence(true); };
+$('bHome').onclick=()=>{ if(S.mode!=='village') return; const h=homePos(); S.x=h.x; S.y=h.y; toast('Tarlana döndün 🏠'); sendPresence(true); };
 
 /* ---------------- Girdi ---------------- */
 const keys={};
 addEventListener('keydown',e=>{
+  if(S.mode==='flight') return;
   if(document.activeElement && document.activeElement.tagName==='INPUT') return;
   keys[e.key.toLowerCase()]=true;
   if(e.key==='e'||e.key==='E'||e.key===' '){ e.preventDefault(); doAction(); }
@@ -580,7 +851,7 @@ addEventListener('resize',resize); resize();
 const joy={id:null,ox:0,oy:0,dx:0,dy:0};
 const taps=new Map();
 cv.addEventListener('pointerdown',e=>{
-  if(!S.me) return;
+  if(!S.me || S.mode!=='village') return;
   cv.setPointerCapture(e.pointerId);
   if(e.pointerType!=='mouse' && e.clientX>VW*0.55 && joy.id===null){ joy.id=e.pointerId; joy.ox=e.clientX; joy.oy=e.clientY; joy.dx=joy.dy=0; return; }
   taps.set(e.pointerId,{x:e.clientX,y:e.clientY,t:performance.now()});
@@ -600,29 +871,41 @@ function worldTap(sx,sy){
   const wx=(sx/Z+camX)/T, wy=(sy/Z+camY)/T;
   const tx=Math.floor(wx), ty=Math.floor(wy);
   const near = (x,y,r)=>Math.hypot(S.x-x,S.y-y)<=r;
-  const pp=plotFromTile(tx,ty);
-  if(pp){
-    if(pp.n!==S.lot){ const id=ownerOfLot(pp.n); toast(id&&S.players[id]?S.players[id].name+'\'in tarlası':'Boş arsa'); return; }
-    if(!near(tx+.5,ty+.5,3.2)){ toast('Biraz daha yaklaş'); return; }
-    actPlot(pp.px,pp.py); return;
+  const L=lotInfo();
+  const ln=lotAtTile(tx,ty);
+  if(ln>=0){
+    const inf=L[ln];
+    if(!inf){ near(tx+.5,ty+.5,7)?openLotSale(ln):toast('🏷️ Satılık arsa — yaklaş ve tabelaya dokun'); return; }
+    if(inf.uid!==S.uid){ toast((inf.p.name||'?')+'\'in tarlası'); return; }
+    const pp=plotFromTile(tx,ty);
+    if(pp && pp.n===ln){
+      if(!near(tx+.5,ty+.5,3.2)){ toast('Biraz daha yaklaş'); return; }
+      actPlot(pp.n,pp.px,pp.py);
+    }
+    return;
   }
   if(tx>=MARKET.x&&tx<MARKET.x+MARKET.w&&ty>=MARKET.y-1&&ty<MARKET.y+MARKET.h){ near(MARKET.door.x,MARKET.door.y,5)?openShop():toast('Pazar\'a yürü 🛒'); return; }
   if(tx>=HANGAR.x&&tx<HANGAR.x+HANGAR.w&&ty>=HANGAR.y-1&&ty<HANGAR.y+HANGAR.h){ near(HANGAR.door.x,HANGAR.door.y,5)?openHangar():toast('Hangar\'a yürü ✈️'); return; }
 }
 
 /* ---------------- Etkileşim düğmesi ---------------- */
-let curAction=null;
 function computeAction(){
-  if(!S.me) return null;
-  const pp=plotFromTile(Math.floor(S.x),Math.floor(S.y));
-  if(pp && pp.n===S.lot){
-    const me=S.me;
-    if(pp.px>=me.w||pp.py>=me.h) return {label:'🔒 Kapalı',fn:()=>actPlot(pp.px,pp.py)};
-    const pl=me.plots[pp.px+'_'+pp.py];
-    if(!pl) return {label:'Ek '+CROPS[S.sel].em+' '+(me.seeds[S.sel]||0),fn:()=>actPlot(pp.px,pp.py)};
-    const left=pl.t+CROPS[pl.c].sure-now();
-    if(left<=0) return {label:'Hasat '+CROPS[pl.c].em,fn:()=>actPlot(pp.px,pp.py)};
-    return {label:'⏳ '+fmtTime(left),fn:()=>actPlot(pp.px,pp.py)};
+  if(!S.me || S.mode!=='village') return null;
+  const tx=Math.floor(S.x), ty=Math.floor(S.y);
+  const ln=lotAtTile(tx,ty);
+  if(ln>=0){
+    const inf=lotInfo()[ln];
+    if(!inf) return {label:'🏷️ Arsa: 💰'+fmtMoney(lotPrice(S.me.farms.length)),fn:()=>openLotSale(ln)};
+    const pp=plotFromTile(tx,ty);
+    if(inf.uid===S.uid && pp && pp.n===ln){
+      const f=inf.farm;
+      if(pp.px>=f.w||pp.py>=f.h) return {label:'🔒 Kapalı',fn:()=>actPlot(ln,pp.px,pp.py)};
+      const pl=f.plots[pp.px+'_'+pp.py];
+      if(!pl) return {label:'Ek '+CROPS[S.sel].em+' '+(S.me.seeds[S.sel]||0)+(S.useGubre?' 🧪':''),fn:()=>actPlot(ln,pp.px,pp.py)};
+      const left=pl.t+cropDur(pl)-now();
+      if(left<=0) return {label:'Hasat '+CROPS[pl.c].em,fn:()=>actPlot(ln,pp.px,pp.py)};
+      return {label:'⏳ '+fmtTime(left),fn:()=>actPlot(ln,pp.px,pp.py)};
+    }
   }
   if(Math.hypot(S.x-MARKET.door.x,S.y-MARKET.door.y)<2.6) return {label:'🛒 Pazar',fn:()=>openShop()};
   if(Math.hypot(S.x-HANGAR.door.x,S.y-HANGAR.door.y)<2.6) return {label:'✈️ Hangar',fn:openHangar};
@@ -632,23 +915,25 @@ function doAction(){ if(panel.classList.contains('on')) return; const a=computeA
 $('action').onclick=doAction;
 let lastLabel=null;
 function updateActionBtn(){
-  curAction=computeAction(); const l=curAction?curAction.label:null;
+  const a=computeAction(); const l=a?a.label:null;
   if(l!==lastLabel){ lastLabel=l; const b=$('action'); if(l){ b.textContent=l; b.style.display='block'; } else b.style.display='none'; }
 }
 
 /* ---------------- Efektler ---------------- */
 const fx=[];
-function plotWorld(px,py){ const o=lotOrigin(S.lot); return {x:(o.x+px+.5)*T, y:(o.y+py+.5)*T}; }
-function puff(px,py,col){ const p=plotWorld(px,py); for(let i=0;i<10;i++) fx.push({x:p.x,y:p.y,vx:(Math.random()-.5)*60,vy:-Math.random()*60-10,life:.6,max:.6,col,r:2+Math.random()*3}); }
-function floatText(px,py,txt){ const p=plotWorld(px,py); fx.push({x:p.x,y:p.y-10,vx:0,vy:-30,life:1.1,max:1.1,txt}); }
+function plotWorld(n,px,py){ const o=lotOrigin(n); return {x:(o.x+px+.5)*T, y:(o.y+py+.5)*T}; }
+function puff(n,px,py,col){ const p=plotWorld(n,px,py); for(let i=0;i<10;i++) fx.push({x:p.x,y:p.y,vx:(Math.random()-.5)*60,vy:-Math.random()*60-10,life:.6,max:.6,col,r:2+Math.random()*3}); }
+function floatText(n,px,py,txt){ const p=plotWorld(n,px,py); fx.push({x:p.x,y:p.y-10,vx:0,vy:-30,life:1.1,max:1.1,txt}); }
 
 /* ---------------- Hareket ---------------- */
 function blocked(x,y){ const r=0.28; for(const [ax,ay] of [[-r,-0.1],[r,-0.1],[-r,0.3],[r,0.3]]){ if(SOLID.has(getT(Math.floor(x+ax),Math.floor(y+ay)))) return true; } return false; }
 function update(dt){
   let ix=0,iy=0;
-  if(keys['a']||keys['arrowleft']) ix--; if(keys['d']||keys['arrowright']) ix++;
-  if(keys['w']||keys['arrowup']) iy--; if(keys['s']||keys['arrowdown']) iy++;
-  if(joy.id!==null){ ix+=joy.dx; iy+=joy.dy; }
+  if(S.mode==='village'){
+    if(keys['a']||keys['arrowleft']) ix--; if(keys['d']||keys['arrowright']) ix++;
+    if(keys['w']||keys['arrowup']) iy--; if(keys['s']||keys['arrowdown']) iy++;
+    if(joy.id!==null){ ix+=joy.dx; iy+=joy.dy; }
+  }
   const L=Math.hypot(ix,iy);
   if(L>0.15 && !panel.classList.contains('on')){
     if(L>1){ ix/=L; iy/=L; }
@@ -660,7 +945,6 @@ function update(dt){
     S.moving=true;
   } else S.moving=false;
   sendPresence(false);
-  // diğer oyuncuları yumuşat
   const k=1-Math.pow(0.0005,dt);
   for(const [id,o] of S.others){ o.x+=(o.tx-o.x)*k; o.y+=(o.ty-o.y)*k; if(Math.hypot(o.tx-o.x,o.ty-o.y)>6){o.x=o.tx;o.y=o.ty;} }
   for(let i=fx.length-1;i>=0;i--){ const f=fx[i]; f.life-=dt; f.x+=f.vx*dt; f.y+=f.vy*dt; if(!f.txt) f.vy+=160*dt; if(f.life<=0) fx.splice(i,1); }
@@ -687,7 +971,6 @@ function drawTile(t,x,y,time){
       ctx.fillStyle=COL.water; ctx.fillRect(sx,sy,T,T);
       const w=Math.sin(time*2+x*0.9+y*1.3);
       ctx.fillStyle=COL.water2; ctx.fillRect(sx+6+w*3,sy+10,10,2); ctx.fillRect(sx+16-w*3,sy+22,8,2);
-      // kıyı
       ctx.fillStyle='#e3cf91';
       if(getT(x,y-1)!==WATER) ctx.fillRect(sx,sy,T,4); if(getT(x,y+1)!==WATER) ctx.fillRect(sx,sy+T-4,T,4);
       if(getT(x-1,y)!==WATER) ctx.fillRect(sx,sy,4,T); if(getT(x+1,y)!==WATER) ctx.fillRect(sx+T-4,sy,4,T);
@@ -696,6 +979,7 @@ function drawTile(t,x,y,time){
       ctx.fillStyle=COL.run; ctx.fillRect(sx,sy,T,T);
       if(y===6 && x>=53 && x<83 && x%3===0){ ctx.fillStyle='#f2f2f2'; ctx.fillRect(sx+4,sy+14,22,4); }
       if((x===52||x===83) && y>=5 && y<=7){ ctx.fillStyle='#f2f2f2'; for(let i=0;i<4;i++) ctx.fillRect(sx+4+i*7,sy+4,4,24); }
+      if(x>=66 && y>=9 && y<=17 && h>0.85){ ctx.fillStyle='#62676e'; ctx.fillRect(sx+3,sy+5,6,2); }
       break;
     case LOT: case FENCE:
       ctx.fillStyle=COL.lot; ctx.fillRect(sx,sy,T,T);
@@ -731,11 +1015,9 @@ function drawMarket(){
   ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(x+6,y+10,w,h);
   ctx.fillStyle='#f3e2bf'; ctx.fillRect(x,y+T*1.4,w,h-T*1.4);
   ctx.fillStyle='#c9a875'; for(let i=0;i<w;i+=16) ctx.fillRect(x+i,y+T*1.4,2,h-T*1.4);
-  // tente
   for(let i=0;i<MARKET.w*2;i++){ ctx.fillStyle=i%2?'#fff4e0':'#e2504c'; ctx.fillRect(x+i*T/2,y,T/2,T*1.6); }
   ctx.fillStyle='rgba(0,0,0,.15)'; ctx.fillRect(x,y+T*1.45,w,5);
   for(let i=0;i<MARKET.w*2;i++){ ctx.fillStyle=i%2?'#fff4e0':'#e2504c'; ctx.beginPath(); ctx.arc(x+i*T/2+T/4,y+T*1.6,T/4,0,Math.PI); ctx.fill(); }
-  // tezgah & sandıklar
   ctx.fillStyle='#8a5a2b'; ctx.fillRect(x+T*0.5,y+h-T*1.4,w-T,T*0.6);
   const goods=['#e8c547','#f08a24','#e0412f','#f5d33a','#e83a5a','#6cbf4f'];
   goods.forEach((g,i)=>{ const gx=x+T*0.8+i*T*1.25, gy=y+h-T*1.9; ctx.fillStyle='#a0703c'; ctx.fillRect(gx,gy,T*0.9,T*0.55); ctx.fillStyle=g; for(let k=0;k<4;k++){ ctx.beginPath(); ctx.arc(gx+6+k*6,gy+4,4,0,7); ctx.fill(); } });
@@ -752,25 +1034,36 @@ function drawHangar(time){
   ctx.fillStyle='#4b535a'; for(let i=x+T;i<x+w-T;i+=10) ctx.fillRect(i,y+h*0.55,2,h*0.45);
   rr(x+w/2-T*1.8,y+T*0.4,T*3.6,T*0.9,8); ctx.fillStyle='#fff8ec'; ctx.fill(); ctx.strokeStyle='#3b2a1a'; ctx.lineWidth=3; ctx.stroke();
   label('HANGAR',x+w/2,y+T*0.85,16,'#3d7fe0');
-  // rüzgar tulumu
   const wx=(HANGAR.x+HANGAR.w+0.6)*T, wy=(HANGAR.y-0.5)*T;
   ctx.fillStyle='#ddd'; ctx.fillRect(wx,wy,3,T*1.4);
   const fl=Math.sin(time*3)*3;
   for(let i=0;i<4;i++){ ctx.fillStyle=i%2?'#fff':'#f07a26'; ctx.fillRect(wx+3+i*7,wy+2+fl*i/4,7,8-i); }
 }
-function drawPlane(cx,cy,scale,body,time){
-  ctx.save(); ctx.translate(cx,cy); ctx.scale(scale,scale);
-  ctx.fillStyle='rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(6,10,44,10,0,0,7); ctx.fill();
-  ctx.fillStyle=body; // gövde (burun sağda)
-  rr(-34,-6,66,12,6); ctx.fill();
-  ctx.fillStyle='#d9d2c3'; rr(-8,-40,18,80,5); ctx.fill(); // kanat
-  ctx.fillStyle='#b3aa98'; ctx.fillRect(-8,-40,4,80);
-  ctx.fillStyle=body; rr(-36,-16,10,32,3); ctx.fill(); // kuyruk
-  ctx.fillStyle='#7fb8d9'; ctx.fillRect(8,-4,8,8);
-  ctx.fillStyle='#8b6f4a'; ctx.fillRect(20,-3,8,2); ctx.fillRect(-20,2,6,2); // pas lekeleri
-  ctx.fillStyle='#444'; ctx.fillRect(32,-1,3,2);
-  ctx.fillStyle='rgba(60,60,60,.8)'; const a=time*0; ctx.fillRect(34,-14,2,28); // pervane
+function drawPlane2D(cx,cy,model,stripe){
+  const big = model==='kingair';
+  ctx.save(); ctx.translate(cx,cy); ctx.scale(big?0.75:0.55,big?0.75:0.55);
+  ctx.fillStyle='rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(6,10,48,12,0,0,7); ctx.fill();
+  const body='#ece6d6';
+  ctx.fillStyle=body; rr(-36,-6,70,12,6); ctx.fill();
+  ctx.fillStyle='#d9d2c3'; rr(-8,big?-46:-42,18,big?92:84,5); ctx.fill();
+  ctx.fillStyle=stripe; ctx.fillRect(-8,big?-46:-42,18,6); ctx.fillRect(-8,big?40:36,18,6); ctx.fillRect(-30,-1.5,60,3);
+  ctx.fillStyle=body; rr(-38,-17,10,34,3); ctx.fill(); ctx.fillStyle=stripe; ctx.fillRect(-38,-2,10,4);
+  ctx.fillStyle='#7fb8d9'; ctx.fillRect(10,-4,8,8);
+  if(big){ for(const s of [-1,1]){ ctx.fillStyle=body; rr(4,s*20-4,16,8,3); ctx.fill(); ctx.fillStyle='#444'; ctx.fillRect(21,s*20-11,2,22); } }
+  else { ctx.fillStyle='#444'; ctx.fillRect(34,-13,2,26); }
+  if(model==='c150'){ ctx.fillStyle='#8b6f4a'; ctx.fillRect(20,-3,7,2); ctx.fillRect(-22,2,6,2); }
   ctx.restore();
+}
+function drawApron(){
+  for(const id in S.players){
+    const p = id===S.uid ? S.me : S.players[id];
+    if(!p || !p.plane) continue;
+    if(p.trip && (p.trip.at || p.trip.flying)) continue;
+    const f=farmsOf(p)[0]; if(!f) continue;
+    const sp=parkSpot(f.lot);
+    drawPlane2D(sp.x*T, sp.y*T, p.plane.model, (id===S.uid?S.color:p.color)||'#999');
+    if(id===S.uid) label('senin', sp.x*T, sp.y*T-24, 11, '#ffe27a');
+  }
 }
 function drawCropAt(c,stage,sx,sy,time,ripe){
   const cr=CROPS[c]; if(!cr) return;
@@ -787,34 +1080,36 @@ function drawCropAt(c,stage,sx,sy,time,ripe){
   if(ripe){ const p=(Math.sin(time*5+sx)+1)/2; ctx.fillStyle=`rgba(255,255,255,${0.4+p*0.6})`; ctx.fillRect(sx+T-9,sy+4,3,3); ctx.fillRect(sx+T-10,sy+5,5,1); ctx.fillRect(sx+T-8,sy+3,1,5); }
 }
 function drawLots(time,x0,y0,x1,y1){
+  const L=lotInfo();
+  const myPrice=lotPrice(S.me.farms.length), canBuy=canBuyLot();
   for(let n=0;n<LOTS;n++){
     const lp=lotPos(n); if(lp.x>x1||lp.y>y1||lp.x+LOT_W<x0||lp.y+LOT_H<y0) continue;
-    const o=lotOrigin(n), ownerId = n===S.lot ? S.uid : ownerOfLot(n), p = ownerId ? S.players[ownerId] : null;
-    const pdata = n===S.lot ? S.me : p;
-    // sınırlar (kapalı alan)
+    const o=lotOrigin(n), inf=L[n], f=inf?inf.farm:null, mine=inf&&inf.uid===S.uid;
     ctx.fillStyle='rgba(60,90,40,.18)'; ctx.fillRect(o.x*T,o.y*T,MAX_W*T,MAX_H*T);
     ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1;
     for(let i=0;i<=MAX_W;i++){ ctx.beginPath(); ctx.moveTo((o.x+i)*T,o.y*T); ctx.lineTo((o.x+i)*T,(o.y+MAX_H)*T); ctx.stroke(); }
     for(let j=0;j<=MAX_H;j++){ ctx.beginPath(); ctx.moveTo(o.x*T,(o.y+j)*T); ctx.lineTo((o.x+MAX_W)*T,(o.y+j)*T); ctx.stroke(); }
-    if(pdata){
-      for(let py=0;py<pdata.h;py++)for(let px=0;px<pdata.w;px++){
+    if(f){
+      for(let py=0;py<f.h;py++)for(let px=0;px<f.w;px++){
         const sx=(o.x+px)*T, sy=(o.y+py)*T;
         ctx.fillStyle=COL.soil; ctx.fillRect(sx+1,sy+1,T-2,T-2);
         ctx.fillStyle=COL.soil2; ctx.fillRect(sx+3,sy+8,T-6,3); ctx.fillRect(sx+3,sy+20,T-6,3);
-        const pl=pdata.plots&&pdata.plots[px+'_'+py];
-        if(pl && CROPS[pl.c]){ const st=cropStage(pl); drawCropAt(pl.c,st,sx,sy,time,st===3 && n===S.lot); }
+        const pl=f.plots&&f.plots[px+'_'+py];
+        if(pl && CROPS[pl.c]){ const st=cropStage(pl); drawCropAt(pl.c,st,sx,sy,time,st===3 && mine); if(pl.g&&st<3&&mine){ ctx.fillStyle='rgba(120,200,255,.7)'; ctx.fillRect(sx+3,sy+T-7,4,4); } }
       }
-      if(n===S.lot){ ctx.strokeStyle='rgba(255,236,150,.85)'; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.strokeRect(o.x*T+1,o.y*T+1,pdata.w*T-2,pdata.h*T-2); ctx.setLineDash([]); }
+      if(mine){ ctx.strokeStyle='rgba(255,236,150,.85)'; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.strokeRect(o.x*T+1,o.y*T+1,f.w*T-2,f.h*T-2); ctx.setLineDash([]); }
     }
     // tabela
     const sx=(lp.x+2)*T, sy=(lp.y)*T-6;
     ctx.fillStyle='#6e4520'; ctx.fillRect(sx+T*0.9,sy+10,4,18);
-    const nm = pdata ? (n===S.lot?S.name:p.name) : 'Boş arsa';
-    ctx.font='bold 13px Trebuchet MS, sans-serif'; const tw=Math.max(60,ctx.measureText(nm).width+28);
-    rr(sx,sy-6,tw,22,5); ctx.fillStyle=pdata?'#f3e2bf':'#ddd'; ctx.fill(); ctx.strokeStyle='#6e4520'; ctx.lineWidth=2.5; ctx.stroke();
-    if(pdata){ ctx.fillStyle=(n===S.lot?S.color:p.color)||'#999'; ctx.beginPath(); ctx.arc(sx+10,sy+5,5,0,7); ctx.fill(); }
-    ctx.fillStyle='#3b2a1a'; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(nm,sx+(pdata?19:8),sy+5.5);
-    if(pdata){ ctx.font='bold 11px Trebuchet MS, sans-serif'; label(plotCount(pdata)+' parsel',sx+tw+30,sy+5,11,'#ffe9a8'); }
+    const color = inf ? (mine?S.color:inf.p.color) : null;
+    const nm = inf ? (mine?S.name:(inf.p.name||'?')) : '🏷️ SATILIK';
+    ctx.font='bold 13px Trebuchet MS, sans-serif'; const tw=Math.max(60,ctx.measureText(nm).width+(inf?28:16));
+    rr(sx,sy-6,tw,22,5); ctx.fillStyle=inf?'#f3e2bf':'#ffe08a'; ctx.fill(); ctx.strokeStyle='#6e4520'; ctx.lineWidth=2.5; ctx.stroke();
+    if(inf){ ctx.fillStyle=color||'#999'; ctx.beginPath(); ctx.arc(sx+10,sy+5,5,0,7); ctx.fill(); }
+    ctx.fillStyle=inf?'#3b2a1a':'#a33d2c'; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(nm,sx+(inf?19:8),sy+5.5);
+    if(inf) label(f.w*f.h+' parsel',sx+tw+30,sy+5,11,'#ffe9a8');
+    else label(canBuy?'💰'+fmtMoney(myPrice):'🔒 💰'+fmtMoney(myPrice),sx+tw+40,sy+5,11,canBuy?'#ffe9a8':'#ddd');
   }
 }
 function drawChar(px,py,color,dir,moving,time,name,isMe,msg,msgAge){
@@ -822,22 +1117,15 @@ function drawChar(px,py,color,dir,moving,time,name,isMe,msg,msgAge){
   const bob = moving ? Math.abs(Math.sin(time*12))*2.5 : 0;
   const step = moving ? Math.sin(time*12) : 0;
   ctx.fillStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(sx,sy+10,10,4,0,0,7); ctx.fill();
-  // bacaklar
   ctx.fillStyle='#3a4a6a'; ctx.fillRect(sx-6,sy+2-bob+step*2,5,8); ctx.fillRect(sx+1,sy+2-bob-step*2,5,8);
-  // gövde
   rr(sx-9,sy-12-bob,18,16,5); ctx.fillStyle=color; ctx.fill(); ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1.5; ctx.stroke();
-  // askılar (tulum)
   ctx.fillStyle='rgba(255,255,255,.35)'; ctx.fillRect(sx-6,sy-12-bob,3,8); ctx.fillRect(sx+3,sy-12-bob,3,8);
-  // kafa
   ctx.fillStyle='#f2c79b'; ctx.beginPath(); ctx.arc(sx,sy-19-bob,8,0,7); ctx.fill();
   if(dir!==2){ ctx.fillStyle='#3b2a1a'; const ex = dir===1?3:(dir===3?-3:0); ctx.fillRect(sx-4+ex,sy-20-bob,2,3); ctx.fillRect(sx+2+ex,sy-20-bob,2,3); }
-  // hasır şapka
   ctx.fillStyle='#e0bb62'; ctx.beginPath(); ctx.ellipse(sx,sy-24-bob,12,4,0,0,7); ctx.fill();
   ctx.fillStyle='#d4a94c'; rr(sx-6,sy-31-bob,12,8,3); ctx.fill();
   ctx.fillStyle=color; ctx.fillRect(sx-6,sy-26-bob,12,2);
-  // isim
   label(name, sx, sy-42-bob, 12, isMe?'#ffe27a':'#fff');
-  // konuşma balonu
   if(msg && msgAge<7){
     ctx.globalAlpha = msgAge>6 ? 7-msgAge : 1;
     ctx.font='bold 13px Trebuchet MS, sans-serif';
@@ -862,27 +1150,24 @@ function render(time){
   const x1=Math.min(MW-1,Math.ceil((camX+vw)/T)), y1=Math.min(MH-1,Math.ceil((camY+vh)/T));
   for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) drawTile(tiles[ti(x,y)],x,y,time);
   drawLots(time,x0,y0,x1,y1);
-  drawMarket(); drawHangar(time);
-  drawPlane((67.5)*T,(13.5)*T,0.9,'#e8e2d0',time);
-  // y-sıralı nesneler: ağaçlar + oyuncular
+  drawMarket(); drawHangar(time); drawApron();
   const ents=[];
   for(let y=Math.max(0,y0-1);y<=Math.min(MH-1,y1+1);y++) for(let x=x0;x<=x1;x++) if(tiles[ti(x,y)]===TREE) ents.push({y:y+0.5,f:()=>drawTree(x,y,time)});
   const pnow=performance.now();
   for(const [id,o] of S.others){
     if(o.t && now()-o.t>90000) continue;
+    if(o.st) continue; // uçuşta / şehirde
     ents.push({y:o.y,f:()=>drawChar(o.x,o.y,o.color||'#999',o.dir||0,o.moving,time,o.name||'?',false,o.msg,o.msgLocal?(pnow-o.msgLocal)/1000:99)});
   }
-  ents.push({y:S.y,f:()=>drawChar(S.x,S.y,S.color,S.dir,S.moving,time,S.name,true,myMsg,S.myMsgLocal?(pnow-S.myMsgLocal)/1000:99)});
+  if(S.mode==='village') ents.push({y:S.y,f:()=>drawChar(S.x,S.y,S.color,S.dir,S.moving,time,S.name,true,myMsg,S.myMsgLocal?(pnow-S.myMsgLocal)/1000:99)});
   ents.sort((a,b)=>a.y-b.y); for(const e of ents) e.f();
-  // efektler
   for(const f of fx){ const a=Math.max(0,f.life/f.max); ctx.globalAlpha=a; if(f.txt) label(f.txt,f.x,f.y,14,'#fff6c2'); else { ctx.fillStyle=f.col; ctx.fillRect(f.x-f.r/2,f.y-f.r/2,f.r,f.r); } } ctx.globalAlpha=1;
-  // joystick
   ctx.setTransform(DPR,0,0,DPR,0,0);
   if(joy.id!==null){
     ctx.fillStyle='rgba(255,248,236,.25)'; ctx.strokeStyle='rgba(59,42,26,.6)'; ctx.lineWidth=3;
     ctx.beginPath(); ctx.arc(joy.ox,joy.oy,55,0,7); ctx.fill(); ctx.stroke();
     ctx.fillStyle='rgba(255,248,236,.85)'; ctx.beginPath(); ctx.arc(joy.ox+joy.dx*55,joy.oy+joy.dy*55,24,0,7); ctx.fill(); ctx.stroke();
-  } else if(matchMedia('(pointer:coarse)').matches){
+  } else if(matchMedia('(pointer:coarse)').matches && S.mode==='village'){
     ctx.fillStyle='rgba(255,248,236,.12)'; ctx.strokeStyle='rgba(255,248,236,.35)'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.arc(VW-80,VH-150,45,0,7); ctx.fill(); ctx.stroke();
   }
@@ -893,13 +1178,858 @@ let lastT=performance.now(), hudT=0;
 function loop(t){
   loop.started=true;
   const dt=Math.min(0.05,(t-lastT)/1000); lastT=t;
-  if(S.me){ update(dt); render(t/1000); }
+  if(S.me && S.mode!=='flight'){ update(dt); render(t/1000); }
+  else if(S.me && S.mode==='flight'){ sendPresence(false); }
   hudT+=dt;
   if(hudT>0.15){ hudT=0; updateActionBtn(); let c=1; for(const o of S.others.values()) if(!o.t||now()-o.t<90000) c++; $('online').textContent='👥 '+c; }
   requestAnimationFrame(loop);
 }
-// Test için dışarıya açık
-window.__game = {S, CROPS, actPlot, openShop, lotOrigin};
+window.__game = {S, CROPS, actPlot, openShop, lotOrigin, depart, buyLot, openHangar, PLANES, CITIES, saveNow};
+
+/* ======================================================================
+   3D UÇUŞ SİMÜLATÖRÜ (harici kütüphane yok — saf WebGL)
+   startFlight(opts) → Promise<sonuç>
+   ====================================================================== */
+const FLSET_DEF = {ctrl:'stick', invert:false, rings:true, sound:true};
+let FLSET = (()=>{ try{ return {...FLSET_DEF, ...JSON.parse(localStorage.getItem('tk_flset')||'{}')}; }catch(e){ return {...FLSET_DEF}; } })();
+const saveFlset = ()=>{ try{ localStorage.setItem('tk_flset', JSON.stringify(FLSET)); }catch(e){} };
+
+// Uçuş modeli parametreleri (SI birimleri)
+const PHYS = {
+  c150:    {mass:700,  S:15,   Tmax:2850,  vprop:85,  cd0:0.034, k:0.055, cl0:0.25, clmax:1.45, roll:1.35, pitch:0.55, stab:2.0, hg:1.2, vr:28, span:10.2, len:7.5, burnIdle:0.25},
+  c172:    {mass:1000, S:16.2, Tmax:3600,  vprop:95,  cd0:0.031, k:0.050, cl0:0.25, clmax:1.50, roll:1.25, pitch:0.50, stab:2.0, hg:1.3, vr:30, span:11.0, len:8.2, burnIdle:0.25},
+  kingair: {mass:5000, S:28,   Tmax:16000, vprop:250, cd0:0.026, k:0.045, cl0:0.22, clmax:1.60, roll:0.95, pitch:0.40, stab:1.8, hg:1.75, vr:44, span:16.6, len:13.4, burnIdle:0.3},
+};
+const KT = 1.94384, FT = 3.28084, FPM = 196.85, D2R = Math.PI/180, GRAV = 9.81, RHO = 1.225;
+const SIM_D = 11000;      // iki pist arası sanal mesafe (m)
+const COMPRESS = 8;       // hızlı seyir katsayısı
+const APP_GATE = 3500;    // yaklaşma başlangıcı (pistten uzaklık)
+
+/* ---------- vektör / matris ---------- */
+const vadd=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]], vsub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], vscl=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+const vdot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], vcross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const vlen=a=>Math.hypot(a[0],a[1],a[2]), vnorm=a=>{const l=vlen(a)||1;return [a[0]/l,a[1]/l,a[2]/l];};
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v), lerp=(a,b,t)=>a+(b-a)*t, ss=(e0,e1,x)=>{const t=clamp((x-e0)/(e1-e0),0,1);return t*t*(3-2*t);};
+const angDiff=(a,b)=>{let d=a-b;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d;};
+function m4(){const r=new Float32Array(16);r[0]=r[5]=r[10]=r[15]=1;return r;}
+function m4mul(a,b){const r=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[i+k*4]*b[k+j*4];r[i+j*4]=s;}return r;}
+function m4persp(fy,as,n,f){const t=1/Math.tan(fy/2),r=new Float32Array(16);r[0]=t/as;r[5]=t;r[10]=(f+n)/(n-f);r[11]=-1;r[14]=2*f*n/(n-f);return r;}
+function m4look(e,c,u){const z=vnorm(vsub(e,c)),x=vnorm(vcross(u,z)),y=vcross(z,x),r=m4();r[0]=x[0];r[1]=y[0];r[2]=z[0];r[4]=x[1];r[5]=y[1];r[6]=z[1];r[8]=x[2];r[9]=y[2];r[10]=z[2];r[12]=-vdot(x,e);r[13]=-vdot(y,e);r[14]=-vdot(z,e);return r;}
+function m4T(x,y,z){const r=m4();r[12]=x;r[13]=y;r[14]=z;return r;}
+function m4RX(a){const r=m4(),c=Math.cos(a),s=Math.sin(a);r[5]=c;r[6]=s;r[9]=-s;r[10]=c;return r;}
+function m4RY(a){const r=m4(),c=Math.cos(a),s=Math.sin(a);r[0]=c;r[2]=-s;r[8]=s;r[10]=c;return r;}
+function m4RZ(a){const r=m4(),c=Math.cos(a),s=Math.sin(a);r[0]=c;r[1]=s;r[4]=-s;r[5]=c;return r;}
+function m4S(x,y,z){const r=m4();r[0]=x;r[5]=y;r[10]=z;return r;}
+const m4xv=(m,v)=>[m[0]*v[0]+m[4]*v[1]+m[8]*v[2], m[1]*v[0]+m[5]*v[1]+m[9]*v[2], m[2]*v[0]+m[6]*v[1]+m[10]*v[2]];
+const hexRGB=h=>{const n=parseInt(h.slice(1),16);return [(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];};
+
+/* ---------- mesh oluşturucu ---------- */
+class MB{
+  constructor(){ this.d=[]; }
+  tri(a,b,c,col){ const n=vnorm(vcross(vsub(b,a),vsub(c,a))); for(const p of [a,b,c]) this.d.push(p[0],p[1],p[2],n[0],n[1],n[2],col[0],col[1],col[2]); }
+  triO(a,b,c,col,hint){ const n=vcross(vsub(b,a),vsub(c,a)); if(vdot(n,hint)<0) this.tri(a,c,b,col); else this.tri(a,b,c,col); }
+  quad(a,b,c,d,col){ this.tri(a,b,c,col); this.tri(a,c,d,col); }
+  quadUp(a,b,c,d,col){ this.triO(a,b,c,col,[0,1,0]); this.triO(a,c,d,col,[0,1,0]); }
+  // eksen hizalı kutu (merkez)
+  box(cx,cy,cz,sx,sy,sz,col){ this.boxB([cx,cy-sy/2,cz],[1,0,0],[0,1,0],[0,0,1],sx,sy,sz,col); }
+  // taban merkezli, döndürülmüş kutu (ex sağ, ey yukarı, ez arka)
+  boxB(c,ex,ey,ez,sx,sy,sz,col){
+    const P=(x,y,z)=>[c[0]+ex[0]*x+ey[0]*y+ez[0]*z, c[1]+ex[1]*x+ey[1]*y+ez[1]*z, c[2]+ex[2]*x+ey[2]*y+ez[2]*z];
+    const x0=-sx/2,x1=sx/2,y0=0,y1=sy,z0=-sz/2,z1=sz/2;
+    const top=col.map(v=>Math.min(1,v*1.04));
+    this.quad(P(x0,y1,z1),P(x1,y1,z1),P(x1,y1,z0),P(x0,y1,z0),top);
+    this.quad(P(x0,y0,z0),P(x1,y0,z0),P(x1,y0,z1),P(x0,y0,z1),col);
+    this.quad(P(x0,y0,z1),P(x1,y0,z1),P(x1,y1,z1),P(x0,y1,z1),col);
+    this.quad(P(x1,y0,z0),P(x0,y0,z0),P(x0,y1,z0),P(x1,y1,z0),col);
+    this.quad(P(x1,y0,z1),P(x1,y0,z0),P(x1,y1,z0),P(x1,y1,z1),col);
+    this.quad(P(x0,y0,z0),P(x0,y0,z1),P(x0,y1,z1),P(x0,y1,z0),col);
+  }
+  upload(gl){ const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(this.d),gl.STATIC_DRAW); return {buf,count:this.d.length/9}; }
+}
+
+/* ---------- WebGL ---------- */
+const VS=`attribute vec3 aP;attribute vec3 aN;attribute vec3 aC;
+uniform mat4 uVP;uniform mat4 uM;uniform vec3 uL;uniform vec3 uCam;uniform vec4 uTint;uniform float uEm;uniform float uFogD;
+varying vec3 vC;varying float vF;
+void main(){vec4 w=uM*vec4(aP,1.0);gl_Position=uVP*w;vec3 n=normalize((uM*vec4(aN,0.0)).xyz);
+float d=max(dot(n,uL),0.0);float sky=0.5+0.5*n.y;vec3 c=mix(aC,uTint.rgb,uTint.a);
+vC=mix(c*(0.38+0.22*sky+0.62*d),c,uEm);float dist=length(w.xyz-uCam);vF=1.0-exp(-pow(dist*uFogD,1.5));}`;
+const FS=`precision mediump float;varying vec3 vC;varying float vF;uniform vec3 uFogC;uniform float uFogOn;uniform float uA;
+void main(){gl_FragColor=vec4(mix(vC,uFogC,clamp(vF*uFogOn,0.0,1.0)),uA);}`;
+function glSetup(canvas){
+  const gl=canvas.getContext('webgl',{antialias:true,alpha:false,powerPreference:'high-performance'});
+  if(!gl) return null;
+  const sh=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(o));return o;};
+  const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,VS));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,FS));gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  gl.useProgram(p);
+  const U={}; for(const n of ['uVP','uM','uL','uCam','uTint','uEm','uFogD','uFogC','uFogOn','uA']) U[n]=gl.getUniformLocation(p,n);
+  const A={P:gl.getAttribLocation(p,'aP'),N:gl.getAttribLocation(p,'aN'),C:gl.getAttribLocation(p,'aC')};
+  gl.enableVertexAttribArray(A.P);gl.enableVertexAttribArray(A.N);gl.enableVertexAttribArray(A.C);
+  gl.enable(gl.DEPTH_TEST);gl.enable(gl.CULL_FACE);
+  return {gl,U,A};
+}
+function drawMesh(R,mesh,M,o={}){
+  if(!mesh||!mesh.count) return;
+  const {gl,U,A}=R;
+  gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buf);
+  gl.vertexAttribPointer(A.P,3,gl.FLOAT,false,36,0);gl.vertexAttribPointer(A.N,3,gl.FLOAT,false,36,12);gl.vertexAttribPointer(A.C,3,gl.FLOAT,false,36,24);
+  gl.uniformMatrix4fv(U.uM,false,M||IDENT);
+  gl.uniform4fv(U.uTint,o.tint||[0,0,0,0]);gl.uniform1f(U.uEm,o.em||0);gl.uniform1f(U.uFogOn,o.fog===false?0:1);gl.uniform1f(U.uA,o.alpha==null?1:o.alpha);
+  if(o.noCull) gl.disable(gl.CULL_FACE);
+  if(o.offset){ gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(o.offset,o.offset); }
+  if(o.alpha!=null){ gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
+  if(o.noDepth) gl.depthMask(false);
+  gl.drawArrays(gl.TRIANGLES,0,mesh.count);
+  if(o.noCull) gl.enable(gl.CULL_FACE);
+  if(o.offset) gl.disable(gl.POLYGON_OFFSET_FILL);
+  if(o.alpha!=null){ gl.disable(gl.BLEND); gl.depthMask(true); }
+  if(o.noDepth) gl.depthMask(true);
+}
+const IDENT=m4();
+
+/* ---------- arazi ---------- */
+function fhash(x,z,s){let h=(Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,982451653))|0;h=Math.imul(h^(h>>>13),1274126177);return ((h^(h>>>16))>>>0)/4294967295;}
+function vnoise(x,z,s){const ix=Math.floor(x),iz=Math.floor(z),fx=x-ix,fz=z-iz,u=fx*fx*(3-2*fx),v=fz*fz*(3-2*fz);const a=fhash(ix,iz,s),b=fhash(ix+1,iz,s),c=fhash(ix,iz+1,s),d=fhash(ix+1,iz+1,s);return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v;}
+function fbm(x,z,s){let t=0,a=1,f=1,n=0;for(let o=0;o<5;o++){t+=vnoise(x*f,z*f,s+o*7)*a;n+=a;a*=0.5;f*=2.07;}return t/n;}
+function segDist(px,pz,ax,az,bx,bz){const dx=bx-ax,dz=bz-az,t=clamp(((px-ax)*dx+(pz-az)*dz)/(dx*dx+dz*dz),0,1);return Math.hypot(px-ax-dx*t,pz-az-dz*t);}
+
+function makeAirport(x,z,hdg,len,wid,kind,name){
+  const u=[Math.sin(hdg),0,-Math.cos(hdg)], r=[Math.cos(hdg),0,Math.sin(hdg)];
+  return {x,z,hdg,len,wid,kind,name,u,r, at:(a,b,y=0)=>[x+u[0]*a+r[0]*b, y, z+u[2]*a+r[2]*b]};
+}
+function onRunway(ap,x,z,m=4){ const dx=x-ap.x,dz=z-ap.z,a=dx*ap.u[0]+dz*ap.u[2],b=dx*ap.r[0]+dz*ap.r[2]; return a>-60-m && a<ap.len+60+m && Math.abs(b)<ap.wid/2+m; }
+function rwyLocal(ap,x,z){ const dx=x-ap.x,dz=z-ap.z; return {a:dx*ap.u[0]+dz*ap.u[2], b:dx*ap.r[0]+dz*ap.r[2]}; }
+
+function buildWorld(R,seed,o,d,coastal){
+  const gl=R.gl, W={o,d,coastal}; const onG=p=>{ p[1]=(W.heightAt?W.heightAt(p[0],p[2]):0)-0.8; return p; };
+  const C=150, XMIN=-10000, XMAX=10000, ZMIN=d.z-8000, ZMAX=7000;
+  const NX=Math.round((XMAX-XMIN)/C), NZ=Math.round((ZMAX-ZMIN)/C);
+  const appS = d.at(-APP_GATE-600,0), coastX = d.x + 2200;
+  const rawH=(x,z)=>{
+    let h=(fbm(x/2700,z/2700,seed)-0.43)*1250; h=Math.max(0,h); h+= (fbm(x/600,z/600,seed+50)-0.5)*30;
+    const dr=Math.min(segDist(x,z,o.x,o.z,o.at(o.len,0)[0],o.at(o.len,0)[2]), segDist(x,z,d.x,d.z,d.at(d.len,0)[0],d.at(d.len,0)[2]));
+    const fRw = ss(900,2700,dr);
+    const dRoute = Math.min(segDist(x,z,o.x,o.z,appS[0],appS[2]), segDist(x,z,appS[0],appS[2],d.x,d.z));
+    h = h*fRw*(0.25+0.75*ss(350,1900,dRoute));
+    if(coastal){ const cx = coastX + Math.sin(z/1700)*500 + Math.sin(z/530)*120; const t=x-cx; if(t>0) h = Math.min(h*(1-ss(0,500,t)), -t*0.04); }
+    return h;
+  };
+  const H=new Float32Array((NX+1)*(NZ+1));
+  for(let j=0;j<=NZ;j++) for(let i=0;i<=NX;i++) H[j*(NX+1)+i]=rawH(XMIN+i*C, ZMIN+j*C);
+  W.heightAt=(x,z)=>{
+    const fi=(x-XMIN)/C, fj=(z-ZMIN)/C; if(fi<0||fj<0||fi>=NX||fj>=NZ) return 0;
+    const i=Math.floor(fi), j=Math.floor(fj), fx=fi-i, fz=fj-j;
+    const hA=H[j*(NX+1)+i], hB=H[j*(NX+1)+i+1], hD=H[(j+1)*(NX+1)+i], hC=H[(j+1)*(NX+1)+i+1];
+    if(fx+fz<=1) return hA+(hB-hA)*fx+(hD-hA)*fz;
+    return hC+(hD-hC)*(1-fx)+(hB-hC)*(1-fz);
+  };
+  W.isWater=(x,z)=>coastal && W.heightAt(x,z)<-0.5;
+  // arazi meshi
+  const FIELDS=['#86b84f','#9fc45c','#c8b55c','#73a845','#a88b55','#93c060','#b9c46a','#6f9e44'].map(hexRGB);
+  const mb=new MB();
+  for(let j=0;j<NZ;j++) for(let i=0;i<NX;i++){
+    const x0=XMIN+i*C, x1=x0+C, z0=ZMIN+j*C, z1=z0+C;
+    const A=[x0,H[j*(NX+1)+i],z0], B=[x1,H[j*(NX+1)+i+1],z0], Dp=[x0,H[(j+1)*(NX+1)+i],z1], Cp=[x1,H[(j+1)*(NX+1)+i+1],z1];
+    const cx=(x0+x1)/2, cz=(z0+z1)/2, hm=(A[1]+B[1]+Cp[1]+Dp[1])/4;
+    let col;
+    if(hm<-0.5) col=hexRGB('#c9b98a');
+    else if(hm>380) col=hexRGB(fhash(i,j,seed)<0.5?'#8b8578':'#9a9384');
+    else if(hm>110) col=hexRGB(fhash(i,j,seed+1)<0.6?'#3f7a3c':'#4c8843');
+    else { const fi=Math.floor(fhash(Math.floor(cx/420),Math.floor(cz/360),seed+3)*FIELDS.length); col=FIELDS[fi]; }
+    const sh=0.94+fhash(i,j,seed+9)*0.1; col=col.map(v=>v*sh);
+    mb.tri(Dp,Cp,B,col); mb.tri(Dp,B,A,col);
+  }
+  W.terrain=mb.upload(gl);
+  // uzak zemin + deniz
+  const far=new MB(); const g=hexRGB('#7fae55'); const Z=60000;
+  far.quad([-Z,-3,Z],[Z,-3,Z],[Z,-3,-Z],[-Z,-3,-Z],g); W.far=far.upload(gl);
+  if(coastal){ const sea=new MB(); const b=hexRGB('#2f74b5'); sea.quad([coastX-800,0,Z],[Z,0,Z],[Z,0,-Z],[coastX-800,0,-Z],b); W.sea=sea.upload(gl); }
+  // pistler, işaretler, binalar, ağaçlar
+  const rw=new MB(), mk=new MB(), bl=new MB(), tr=new MB();
+  const asph=hexRGB('#4a4e54'), white=[0.95,0.95,0.95], yellow=hexRGB('#f2c230');
+  for(const ap of [o,d]){
+    const w=ap.wid/2;
+    rw.quadUp(ap.at(-60,-w,0.05),ap.at(ap.len+60,-w,0.05),ap.at(ap.len+60,w,0.05),ap.at(-60,w,0.05),asph);
+    // eşik çizgileri
+    for(const end of [0,1]) for(let k=0;k<8;k++){
+      const b=-w+3+k*(ap.wid-6)/7.0; const a0=end?ap.len-36:6, a1=end?ap.len-6:36;
+      mk.quadUp(ap.at(a0,b-0.9,0.05),ap.at(a1,b-0.9,0.05),ap.at(a1,b+0.9,0.05),ap.at(a0,b+0.9,0.05),white);
+    }
+    for(let a=60;a<ap.len-60;a+=55) mk.quadUp(ap.at(a,-0.45,0.05),ap.at(a+30,-0.45,0.05),ap.at(a+30,0.45,0.05),ap.at(a,0.45,0.05),white);
+    for(const a of [150,ap.len-200]) for(const s of [-1,1]) mk.quadUp(ap.at(a,s*w*0.45-2,0.05),ap.at(a+45,s*w*0.45-2,0.05),ap.at(a+45,s*w*0.45+2,0.05),ap.at(a,s*w*0.45+2,0.05),white);
+    // kenar çizgileri
+    for(const s of [-1,1]) mk.quadUp(ap.at(0,s*w-0.4,0.05),ap.at(ap.len,s*w-0.4,0.05),ap.at(ap.len,s*w+0.4,0.05),ap.at(0,s*w+0.4,0.05),white);
+    // apron + bina
+    const ey=[0,1,0], ez=vscl(ap.u,-1);
+    const apronB = w+70;
+    rw.quadUp(ap.at(ap.len*0.3,apronB-30,0.05),ap.at(ap.len*0.6,apronB-30,0.05),ap.at(ap.len*0.6,apronB+60,0.05),ap.at(ap.len*0.3,apronB+60,0.05),hexRGB('#62666c'));
+    mk.quadUp(ap.at(ap.len*0.3,w,0.05),ap.at(ap.len*0.3+20,w,0.05),ap.at(ap.len*0.3+20,apronB-30,0.05),ap.at(ap.len*0.3,apronB-30,0.05),hexRGB('#62666c'));
+    bl.boxB(onG(ap.at(ap.len*0.42,apronB+85)),ap.r,ey,ez,50,14,60,hexRGB('#9aa4ad'));
+    bl.boxB(onG(ap.at(ap.len*0.52,apronB+75)),ap.r,ey,ez,14,22,14,hexRGB('#e8e2d3')); // kule
+    bl.boxB(ap.at(ap.len*0.52,apronB+75,22),ap.r,ey,ez,16,5,16,hexRGB('#3c5a72'));
+    // rüzgâr tulumu direği
+    bl.boxB(ap.at(250,-w-25),ap.r,ey,ez,0.4,8,0.4,[0.85,0.85,0.85]);
+    if(ap.kind==='koy'){
+      for(let k=0;k<26;k++){
+        const a=fhash(k,1,seed)*ap.len*1.2-100, b=-(w+120+fhash(k,2,seed)*450);
+        const c=onG(ap.at(a,b)), sx=8+fhash(k,3,seed)*6, sz=9+fhash(k,4,seed)*6, hgt=4+fhash(k,5,seed)*3;
+        bl.boxB(c,ap.r,ey,ez,sx,hgt,sz,hexRGB(['#f1e4c8','#e9d3b0','#f4efe4','#e4cfa8'][k%4]));
+        // çatı (üçgen prizma)
+        const roof=hexRGB(['#b5442f','#c9562e','#a33d2c'][k%3]);
+        const P=(x,y,z)=>vadd(vadd(vadd(c,vscl(ap.r,x)),[0,y,0]),vscl(ez,z));
+        const yb=hgt, yt=hgt+4; const hx=sx/2+0.6, hz=sz/2+0.6;
+        bl.triO(P(-hx,yb,-hz),P(hx,yb,-hz),P(hx,yt,0),roof,vsub(P(0,yt,-hz),P(0,yb,0)));
+        bl.triO(P(-hx,yb,-hz),P(hx,yt,0),P(-hx,yt,0),roof,vsub(P(0,yt,-hz),P(0,yb,0)));
+        bl.triO(P(-hx,yb,hz),P(hx,yt,0),P(hx,yb,hz),roof,vsub(P(0,yt,hz),P(0,yb,0)));
+        bl.triO(P(-hx,yb,hz),P(-hx,yt,0),P(hx,yt,0),roof,vsub(P(0,yt,hz),P(0,yb,0)));
+        bl.triO(P(-hx,yb,-hz),P(-hx,yt,0),P(-hx,yb,hz),roof,ap.r.map(v=>-v));
+        bl.triO(P(hx,yb,-hz),P(hx,yb,hz),P(hx,yt,0),roof,ap.r);
+      }
+    } else {
+      const big = name==='Ankara'?1.6:1;
+      for(let gx=0;gx<9;gx++) for(let gz=0;gz<7;gz++){
+        if(fhash(gx,gz,seed+7)<0.15) continue;
+        const a=-300+gx*230+fhash(gx,gz,seed)*60, b=w+260+gz*170;
+        const hgt=(10+Math.pow(fhash(gx,gz,seed+2),2.2)*70*big)*(gz<2?0.6:1);
+        const cc=hexRGB(['#d9d4c7','#c7c2b8','#e3dccd','#b8b4ad','#cfc6b4','#9fb0bf'][(gx*3+gz)%6]);
+        bl.boxB(onG(ap.at(a,b)),ap.r,ey,ez,40+fhash(gx,gz,seed+4)*40,hgt,40+fhash(gx,gz,seed+5)*50,cc);
+        if(hgt>45) bl.boxB(vadd(onG(ap.at(a,b)),[0,hgt,0]),ap.r,ey,ez,12,3,12,[0.4,0.4,0.42]);
+      }
+    }
+  }
+  // ağaçlar
+  let placed=0;
+  for(let k=0;k<6000 && placed<1300;k++){
+    const x=XMIN+fhash(k,11,seed)*(XMAX-XMIN), z=ZMIN+fhash(k,12,seed)*(ZMAX-ZMIN);
+    const h=W.heightAt(x,z); if(h<0.5||h>360) continue;
+    let near=false; for(const ap of [o,d]){ const l=rwyLocal(ap,x,z); if(l.a>-250&&l.a<ap.len+250&&Math.abs(l.b)<ap.wid/2+180) near=true; if(ap.kind!=='koy'){ if(l.a>-400&&l.a<ap.len+300&&l.b>0&&l.b<1500) near=true; } }
+    if(near) continue;
+    if(h<100 && fhash(Math.floor(x/420),Math.floor(z/360),seed+21)>0.35) continue; // tarlalar açık kalsın
+    const th=7+fhash(k,13,seed)*9, rr=2.5+fhash(k,14,seed)*1.8, col=hexRGB(fhash(k,15,seed)<0.5?'#2f6b34':'#3b7d3c');
+    const base=[]; for(let s=0;s<5;s++){ const an=s/5*Math.PI*2; base.push([x+Math.cos(an)*rr,h+1.5,z+Math.sin(an)*rr]); }
+    const apex=[x,h+th,z];
+    for(let s=0;s<5;s++){ const a=base[s],b=base[(s+1)%5]; tr.triO(a,b,apex,col,[(a[0]+b[0])/2-x,0.3,(a[2]+b[2])/2-z]); }
+    tr.box(x,h+0.75,z,0.6,1.5,0.6,hexRGB('#6b4a2b'));
+    placed++;
+  }
+  W.runway=rw.upload(gl); W.marks=mk.upload(gl); W.bld=bl.upload(gl); W.trees=tr.upload(gl);
+  // bulutlar
+  const cl=new MB(), cw=[0.97,0.98,1];
+  for(let k=0;k<70;k++){
+    const x=XMIN+fhash(k,31,seed)*(XMAX-XMIN)*1.4-4000, z=ZMIN+fhash(k,32,seed)*(ZMAX-ZMIN), y=900+fhash(k,33,seed)*700;
+    for(let p=0;p<4;p++){
+      const cx=x+(fhash(k,40+p,seed)-0.5)*500, cz=z+(fhash(k,50+p,seed)-0.5)*300, cy=y+(fhash(k,60+p,seed))*60;
+      const rx=120+fhash(k,70+p,seed)*160, ry=40+fhash(k,80+p,seed)*40, rz=90+fhash(k,90+p,seed)*120;
+      const V=[[cx+rx,cy,cz],[cx-rx,cy,cz],[cx,cy+ry,cz],[cx,cy-ry*0.4,cz],[cx,cy,cz+rz],[cx,cy,cz-rz]];
+      const F=[[0,2,4],[4,2,1],[1,2,5],[5,2,0],[0,4,3],[4,1,3],[1,5,3],[5,0,3]];
+      for(const f of F){ const a=V[f[0]],b=V[f[1]],c=V[f[2]]; cl.triO(a,b,c,cw,vsub(vscl(vadd(vadd(a,b),c),1/3),[cx,cy,cz])); }
+    }
+  }
+  W.clouds=cl.upload(gl);
+  // yaklaşma halkaları (3°)
+  const rg=new MB(), rc=hexRGB('#3fd6ff');
+  for(let s=500;s<=APP_GATE+500;s+=500){
+    const c=d.at(-s,0,15+s*Math.tan(3*D2R)), R1=22, R2=26;
+    for(let k=0;k<16;k++){
+      const a0=k/16*Math.PI*2, a1=(k+1)/16*Math.PI*2;
+      const P=(r,a)=>vadd(c, vadd(vscl(d.r,Math.cos(a)*r),[0,Math.sin(a)*r,0]));
+      rg.quad(P(R1,a0),P(R2,a0),P(R2,a1),P(R1,a1),rc);
+    }
+  }
+  W.rings=rg.upload(gl);
+  // PAPI kutusu ve gölge, rüzgâr tulumu
+  const pb=new MB(); pb.box(0,0.6,0,2.2,1.2,1.4,[1,1,1]); W.papiBox=pb.upload(gl);
+  W.papiPos=[0,1,2,3].map(i=>d.at(300,-(d.wid/2+12+i*9),0));
+  const sd=new MB(); sd.quad([-0.5,0,0.5],[0.5,0,0.5],[0.5,0,-0.5],[-0.5,0,-0.5],[0,0,0]); W.shadow=sd.upload(gl);
+  const ws=new MB(); ws.box(0,0,1.8,1.0,1.0,3.6,hexRGB('#f07a26')); W.sock=ws.upload(gl);
+  // gökyüzü kubbesi
+  const sk=new MB(), zen=hexRGB('#3c7fd4'), hor=hexRGB('#d3e6f5');
+  const SR=20000, rings=10, segs=24;
+  for(let i=0;i<rings;i++){
+    const e0=(-0.15+i/rings*1.15)*Math.PI/2, e1=(-0.15+(i+1)/rings*1.15)*Math.PI/2;
+    const c0=hor.map((h,k)=>lerp(h,zen[k],Math.pow(clamp(Math.sin(e0),0,1),0.6))), c1=hor.map((h,k)=>lerp(h,zen[k],Math.pow(clamp(Math.sin(e1),0,1),0.6)));
+    for(let s=0;s<segs;s++){
+      const a0=s/segs*Math.PI*2, a1=(s+1)/segs*Math.PI*2;
+      const P=(e,a)=>[Math.cos(e)*Math.cos(a)*SR, Math.sin(e)*SR, Math.cos(e)*Math.sin(a)*SR];
+      // renk köşe başına değil yüz başına (basit) — iki üçgene farklı renk
+      sk.tri(P(e0,a0),P(e1,a0),P(e1,a1),c1); sk.tri(P(e0,a0),P(e1,a1),P(e0,a1),c0);
+    }
+  }
+  W.sky=sk.upload(gl); W.fogC=hor;
+  return W;
+}
+
+/* ---------- uçak modelleri ---------- */
+function buildPlane(R,model,colorHex){
+  const b=new MB(), p=new MB(), c=hexRGB(colorHex), wh=hexRGB('#f2efe6'), gl_=hexRGB('#4d6f8c'), dk=hexRGB('#2b2b2e'), gr=hexRGB('#9a9ea4');
+  let props, span;
+  if(model==='kingair'){
+    b.box(0,0.3,-0.6,1.7,1.9,8.6,wh); b.box(0,0.1,-5.4,1.3,1.4,1.6,wh); b.box(0,0.0,-6.4,0.8,0.8,0.8,wh);
+    b.box(0,0.9,-4.4,1.5,0.55,0.9,gl_); b.box(0,0.65,-1.2,1.72,0.4,5.5,gl_);
+    b.box(0,0.6,4.5,1.1,1.3,3.2,wh); b.box(0,-0.15,-0.6,1.74,0.25,12.6,c);
+    b.box(0,-0.35,-0.8,16.6,0.25,2.3,wh); for(const s of [-1,1]) b.box(s*8.1,-0.35,-0.8,0.5,0.27,2.3,c);
+    for(const s of [-1,1]){ b.box(s*2.7,-0.15,-1.7,0.9,0.9,3.4,wh); b.box(s*2.7,-0.15,-3.45,0.5,0.5,0.3,c); b.box(s*2.7,-1.05,-1.2,0.15,1.1,0.15,gr); b.box(s*2.7,-1.55,-1.2,0.25,0.4,0.6,dk); }
+    b.box(0,2.1,5.2,0.14,2.8,1.7,c); b.box(0,3.45,5.7,5.4,0.14,1.1,wh); b.box(0,-1.0,-4.6,0.15,1.0,0.15,gr); b.box(0,-1.55,-4.6,0.2,0.4,0.5,dk);
+    props=[[-2.7,-0.15,-3.65],[2.7,-0.15,-3.65]]; span=16.6;
+    p.box(0,0,0,0.18,2.5,0.06,dk); p.box(0,0,0,2.5,0.18,0.06,dk);
+  } else {
+    const k = model==='c172'?1.08:1;
+    const B=(x,y,z,sx,sy,sz,col)=>b.box(x*k,y*k,z*k,sx*k,sy*k,sz*k,col);
+    B(0,0.1,-2.9,1.0,1.0,1.4,wh); B(0,0.1,-3.65,0.4,0.4,0.25,c);
+    B(0,0.25,-1.4,1.1,1.35,1.8,wh); B(0,0.72,-2.2,1.0,0.5,0.35,gl_); B(0,0.55,-1.35,1.12,0.42,1.5,gl_);
+    B(0,0.2,0.9,0.8,0.95,2.8,wh); B(0,0.35,2.6,0.45,0.6,1.0,wh);
+    B(0,-0.12,-1.4,1.13,0.16,1.8,c); B(0,-0.05,0.9,0.82,0.16,2.8,c);
+    B(0,1.0,-1.4,10.2,0.14,1.5,wh); for(const s of [-1,1]){ B(s*4.95,1.0,-1.4,0.3,0.16,1.5,c); B(s*1.7,0.35,-1.35,0.08,1.25,0.12,gr); }
+    B(0,0.35,3.0,3.4,0.1,0.9,wh); B(0,1.1,3.0,0.1,1.5,1.1,c);
+    for(const s of [-1,1]){ B(s*1.1,-0.7,-1.0,0.1,0.7,0.1,gr); B(s*1.15,-1.0,-1.0,0.2,0.4,0.42,dk); }
+    B(0,-0.65,-2.9,0.1,0.7,0.1,gr); B(0,-0.98,-2.9,0.16,0.4,0.4,dk);
+    props=[[0,0.1*k,-3.8*k]]; span=10.2*k;
+    p.box(0,0,0,0.13,1.9*k,0.06,dk);
+  }
+  return {body:b.upload(R.gl), prop:p.upload(R.gl), props, span};
+}
+
+/* ---------- ses ---------- */
+function makeAudio(){
+  try{
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    const master=ac.createGain(); master.gain.value=FLSET.sound?0.5:0; master.connect(ac.destination);
+    const lp=ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900; lp.connect(master);
+    const eg=ac.createGain(); eg.gain.value=0; eg.connect(lp);
+    const o1=ac.createOscillator(); o1.type='sawtooth'; o1.frequency.value=40; o1.connect(eg); o1.start();
+    const o2=ac.createOscillator(); o2.type='square'; o2.frequency.value=80; const g2=ac.createGain(); g2.gain.value=0.25; o2.connect(g2); g2.connect(eg); o2.start();
+    const nb=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate); const nd=nb.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=Math.random()*2-1;
+    const ns=ac.createBufferSource(); ns.buffer=nb; ns.loop=true; const bp=ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=700; bp.Q.value=0.6;
+    const ng=ac.createGain(); ng.gain.value=0; ns.connect(bp); bp.connect(ng); ng.connect(master); ns.start();
+    const ho=ac.createOscillator(); ho.type='square'; ho.frequency.value=1500; const hg=ac.createGain(); hg.gain.value=0; ho.connect(hg); hg.connect(master); ho.start();
+    return {ac,master,o1,o2,eg,ng,hg,
+      set(rpm,v,horn,t){ const now=ac.currentTime; o1.frequency.setTargetAtTime(28+rpm*62,now,0.05); o2.frequency.setTargetAtTime(56+rpm*124,now,0.05);
+        eg.gain.setTargetAtTime(rpm>0.02?0.10+rpm*0.16:0,now,0.08); ng.gain.setTargetAtTime(Math.min(0.35,(v/70)*(v/70)*0.3),now,0.1);
+        hg.gain.setTargetAtTime(horn&&(t*4%1<0.5)?0.05:0,now,0.01); },
+      thump(str){ const now=ac.currentTime, o=ac.createOscillator(), g=ac.createGain(); o.type='sine'; o.frequency.setValueAtTime(90,now); o.frequency.exponentialRampToValueAtTime(30,now+0.3); g.gain.setValueAtTime(Math.min(0.8,str),now); g.gain.exponentialRampToValueAtTime(0.001,now+0.4); o.connect(g); g.connect(master); o.start(); o.stop(now+0.45); },
+      mute(m){ master.gain.value=m?0:0.5; },
+      close(){ try{ ac.close(); }catch(e){} } };
+  }catch(e){ return null; }
+}
+
+/* ---------- arayüz (DOM) ---------- */
+function flightDOM(){
+  let el=document.getElementById('flight');
+  if(el) return el;
+  const css=document.createElement('style'); css.textContent=`
+  #flight{position:fixed;inset:0;z-index:50;background:#9cc6ea;display:none;touch-action:none;user-select:none;-webkit-user-select:none}
+  #flight.on{display:block}
+  #flight canvas{position:absolute;inset:0;width:100%;height:100%}
+  #flHint{position:absolute;top:calc(8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:rgba(20,28,38,.72);color:#fff;font-weight:700;font-size:14px;padding:6px 12px;border-radius:12px;max-width:min(62vw,520px);text-align:center;pointer-events:none}
+  @media (max-width:560px){ #flHint{font-size:12px;padding:5px 9px} }
+  #flWarn{position:absolute;top:max(38%,222px);left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:4px;align-items:center;pointer-events:none}
+  #flWarn div{background:#c62828;color:#fff;font-weight:900;font-size:15px;padding:4px 12px;border-radius:8px;border:2px solid #fff}
+  #flWarn div.amber{background:#e08a00}
+  .flBtn{position:absolute;background:rgba(255,248,236,.92);border:3px solid #3b2a1a;border-radius:14px;font-weight:800;font-size:15px;color:#3b2a1a;min-width:58px;height:48px;padding:0 10px;font-family:inherit;box-shadow:0 3px 0 rgba(0,0,0,.35)}
+  .flBtn:active,.flBtn.down{transform:translateY(2px);box-shadow:0 1px 0 rgba(0,0,0,.35);background:#ffd9a8}
+  #flThr{position:absolute;left:14px;bottom:calc(16px + env(safe-area-inset-bottom));width:62px;height:min(210px,38vh);background:rgba(255,248,236,.85);border:3px solid #3b2a1a;border-radius:16px}
+  #flThrFill{position:absolute;left:6px;right:6px;bottom:6px;background:linear-gradient(#ffb15c,#e8913a);border-radius:10px}
+  #flThrLbl{position:absolute;left:0;right:0;top:-24px;text-align:center;font-weight:900;color:#fff;text-shadow:0 1px 3px #000;font-size:14px}
+  #flRestart{display:none;left:50%;transform:translateX(-50%);top:54%;background:#ffcc33}
+  #flCard{position:absolute;inset:0;background:rgba(10,20,30,.55);display:none;align-items:center;justify-content:center;padding:16px}
+  #flCard.on{display:flex}
+  #flCard .card{max-width:420px}
+  #flKeys{position:absolute;left:12px;bottom:10px;color:#fff;font-size:12px;text-shadow:0 1px 2px #000;pointer-events:none;line-height:1.4}
+  `;
+  document.head.appendChild(css);
+  el=document.createElement('div'); el.id='flight';
+  el.innerHTML=`<canvas id="flGL"></canvas><canvas id="flHUD"></canvas>
+  <div id="flHint"></div><div id="flWarn"></div>
+  <div id="flThr"><div id="flThrLbl">GAZ 0%</div><div id="flThrFill"></div></div>
+  <button class="flBtn" id="flFlap" style="left:88px;bottom:calc(128px + env(safe-area-inset-bottom))">FLAP 0</button>
+  <button class="flBtn" id="flBrake" style="left:88px;bottom:calc(72px + env(safe-area-inset-bottom))">FREN</button>
+  <button class="flBtn" id="flCam" style="left:88px;bottom:calc(16px + env(safe-area-inset-bottom))">📷</button>
+  <button class="flBtn" id="flPause" style="right:12px;top:calc(8px + env(safe-area-inset-top));min-width:48px;font-weight:900">II</button>
+  <button class="flBtn" id="flRestart">🔑 Motoru çalıştır</button>
+  <div id="flKeys"></div>
+  <div id="flCard"><div class="card" id="flCardIn"></div></div>`;
+  document.body.appendChild(el);
+  return el;
+}
+
+/* ---------- ana uçuş fonksiyonu ---------- */
+function startFlight(opts){
+  return new Promise(resolve=>{
+    const el=flightDOM(); el.classList.add('on');
+    const glc=document.getElementById('flGL'), hc=document.getElementById('flHUD'), hx=hc.getContext('2d');
+    let R; try{ R=glSetup(glc); }catch(e){ R=null; console.error(e); }
+    if(!R){ el.classList.remove('on'); resolve({outcome:'aborted', error:'3D desteklenmiyor', fuelLeft:opts.fuelL, damage:{}}); return; }
+    const gl=R.gl;
+    const P=PHYS[opts.model];
+    const seed=(opts.seed|0)||7;
+    // pistler: kalkış (0,0) kuzeye; varış SIM_D kuzeyde, yan kayma ve açı rastgele
+    const rnd=k=>fhash(seed,k,99);
+    const oKind=opts.from.kind, dKind=opts.to.kind;
+    const oLen=oKind==='koy'?1100:2000, dLen=dKind==='koy'?1100:2000;
+    const O=makeAirport(0,0,0,oLen,oKind==='koy'?24:40,oKind,opts.from.name);
+    const dHdg=(rnd(1)-0.5)*70*D2R, dx=(rnd(2)-0.5)*5000;
+    const D=makeAirport(dx,-SIM_D,dHdg,dLen,dKind==='koy'?24:40,dKind,opts.to.name);
+    const W=buildWorld(R,seed,O,D,!!opts.to.coastal);
+    const PL=buildPlane(R,opts.model,opts.color||'#e2504c');
+    // rüzgâr
+    const windFrom=rnd(3)*Math.PI*2, windSpd=(rnd(4)*7)*(opts.windMul??1);
+    const windV=[-Math.sin(windFrom)*windSpd,0,Math.cos(windFrom)*windSpd];
+    // durum
+    const st={
+      pos:O.at(25,0,P.hg), vel:[0,0,0], psi:O.hdg, th:0, ph:0, thr:0, flap:0, brake:false,
+      in:{p:0,r:0}, onGround:true, engineOn:true, rough:false, leak:false, asiFail:false, altFail:false, altFrozen:0,
+      fuel:opts.fuelL, fuelCap:opts.fuelCap, t:0, tAir:0, tookOff:false, airTime:0, done:false, paused:false,
+      cam:'chase', camPos:null, shake:0, stall:false, propA:0, rpm:0, damage:{engine:0,airframe:0,inst:0},
+      fails:(opts.failures||[]).map(f=>({...f,done:false})), restartCd:0, msgs:[], lastTouch:null, groundRoughT:0, distReal:0,
+      compress:false, phase:'ground', vsDisp:0, timeScale:1, ap:null, maxAlt:0,
+    };
+    st.camPos=vadd(st.pos,[0,4,14]);
+    const AU = makeAudio();
+    // ---- girdi ----
+    const keys={};
+    const kd=e=>{ if(!el.classList.contains('on')) return; keys[e.key.toLowerCase()]=true;
+      const k=e.key.toLowerCase();
+      if(k==='v') cycleFlap(); if(k==='c') toggleCam(); if(k==='escape'||k==='p') togglePause();
+      if(k==='k') tryRestart();
+      if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) e.preventDefault(); };
+    const ku=e=>{ keys[e.key.toLowerCase()]=false; };
+    addEventListener('keydown',kd,true); addEventListener('keyup',ku,true);
+    const onWheel=e=>{ st.thr=clamp(st.thr-Math.sign(e.deltaY)*0.05,0,1); };
+    el.addEventListener('wheel',onWheel,{passive:true});
+    const coarse = matchMedia('(pointer:coarse)').matches;
+    document.getElementById('flKeys').innerHTML = coarse ? '' : 'W/S veya ↑/↓: burun aşağı/yukarı · A/D: yatış · R/F: gaz · V: flap · B/Boşluk: fren · C: kamera · K: motor · Esc: menü';
+    // gaz çubuğu
+    const thrEl=document.getElementById('flThr');
+    let thrPid=null;
+    const setThrFromY=y=>{ const r=thrEl.getBoundingClientRect(); st.thr=clamp(1-(y-r.top-6)/(r.height-12),0,1); };
+    thrEl.addEventListener('pointerdown',e=>{ thrPid=e.pointerId; thrEl.setPointerCapture(e.pointerId); setThrFromY(e.clientY); e.stopPropagation(); });
+    thrEl.addEventListener('pointermove',e=>{ if(e.pointerId===thrPid) setThrFromY(e.clientY); });
+    thrEl.addEventListener('pointerup',e=>{ if(e.pointerId===thrPid) thrPid=null; });
+    // butonlar
+    const flapBtn=document.getElementById('flFlap'), brakeBtn=document.getElementById('flBrake');
+    function cycleFlap(){ st.flap=(st.flap+1)%3; flapBtn.textContent='FLAP '+st.flap; }
+    function toggleCam(){ st.cam = st.cam==='chase'?'cockpit':'chase'; }
+    flapBtn.onclick=cycleFlap; document.getElementById('flCam').onclick=toggleCam;
+    let brakeTouch=false;
+    brakeBtn.onpointerdown=e=>{ brakeTouch=true; brakeBtn.classList.add('down'); e.stopPropagation(); };
+    brakeBtn.onpointerup=brakeBtn.onpointercancel=brakeBtn.onpointerleave=()=>{ brakeTouch=false; brakeBtn.classList.remove('down'); };
+    const restartBtn=document.getElementById('flRestart');
+    function tryRestart(){
+      if(st.engineOn||st.fuel<=0||st.restartCd>0) return;
+      st.restartCd=4;
+      if(Math.random()<0.35){ st.engineOn=true; st.msgs.push({t:'Motor tekrar çalıştı! 😅',until:st.t+3}); }
+      else st.msgs.push({t:'Çalışmadı… tekrar dene',until:st.t+2});
+    }
+    restartBtn.onclick=tryRestart;
+    // joystick (sağ yarı) — eğme modunda kapalı
+    const stick={id:null,ox:0,oy:0,x:0,y:0};
+    const pd=e=>{ if(st.done||st.paused) return; if(e.target!==hc) return; if(FLSET.ctrl==='tilt') return;
+      if(e.clientX>innerWidth*0.4 && stick.id===null){ stick.id=e.pointerId; stick.ox=e.clientX; stick.oy=e.clientY; stick.x=stick.y=0; hc.setPointerCapture(e.pointerId); } };
+    const pm=e=>{ if(e.pointerId!==stick.id) return; const R0=70; let dx=e.clientX-stick.ox, dy=e.clientY-stick.oy; const L=Math.hypot(dx,dy); if(L>R0){dx*=R0/L;dy*=R0/L;} stick.x=dx/R0; stick.y=dy/R0; };
+    const pu=e=>{ if(e.pointerId===stick.id){ stick.id=null; stick.x=stick.y=0; } };
+    hc.addEventListener('pointerdown',pd); hc.addEventListener('pointermove',pm); hc.addEventListener('pointerup',pu); hc.addEventListener('pointercancel',pu);
+    // eğme
+    const tilt={r:0,p:0,n0:null};
+    const onOri=e=>{
+      if(e.beta==null) return;
+      const ang=(screen.orientation&&screen.orientation.angle)||window.orientation||0;
+      let r,p;
+      if(ang===90){ r=e.beta; p=-e.gamma; } else if(ang===-90||ang===270){ r=-e.beta; p=e.gamma; } else { r=e.gamma; p=e.beta; }
+      if(!tilt.n0) tilt.n0={r,p};
+      tilt.r=clamp((r-tilt.n0.r)/28,-1,1); tilt.p=clamp((p-tilt.n0.p)/22,-1,1);
+    };
+    addEventListener('deviceorientation',onOri);
+    const calibrate=()=>{ tilt.n0=null; };
+    // ---- duraklatma menüsü ----
+    const card=document.getElementById('flCard'), cardIn=document.getElementById('flCardIn');
+    function togglePause(){
+      if(st.done) return;
+      st.paused=!st.paused;
+      if(!st.paused){ card.classList.remove('on'); return; }
+      const canAbort = !st.tookOff && st.onGround;
+      cardIn.innerHTML=`<h2>⏸ Duraklatıldı</h2>
+        <div class="row"><div class="grow"><b>Kontrol</b><div class="muted">Telefonda kumanda kolu ya da telefonu eğerek</div></div>
+          <button class="btn ${FLSET.ctrl==='stick'?'primary':''}" data-c="stick">🕹️</button><button class="btn ${FLSET.ctrl==='tilt'?'primary':''}" data-c="tilt">📱 Eğme</button></div>
+        ${FLSET.ctrl==='tilt'?'<div class="row"><div class="grow">Telefonu rahat tuttuğun açıda tut ve bas</div><button class="btn" data-cal>🎯 Kalibre et</button></div>':''}
+        <div class="row"><div class="grow"><b>Ters burun ekseni</b><div class="muted">Kapalı: çubuğu kendine çekince burun kalkar (gerçek uçak gibi)</div></div><button class="btn ${FLSET.invert?'primary':''}" data-inv>${FLSET.invert?'Açık':'Kapalı'}</button></div>
+        <div class="row"><div class="grow"><b>Yaklaşma halkaları</b></div><button class="btn ${FLSET.rings?'primary':''}" data-rings>${FLSET.rings?'Açık':'Kapalı'}</button></div>
+        <div class="row"><div class="grow"><b>Ses</b></div><button class="btn ${FLSET.sound?'primary':''}" data-snd>${FLSET.sound?'Açık':'Kapalı'}</button></div>
+        <button class="btn primary" style="width:100%;margin-top:10px" data-resume>▶ Devam</button>
+        ${canAbort?'<button class="btn" style="width:100%;margin-top:8px" data-abort>✖ Uçuşu iptal et</button>':''}`;
+      card.classList.add('on');
+    }
+    document.getElementById('flPause').onclick=togglePause;
+    cardIn.onclick=async e=>{
+      const b=e.target.closest('button'); if(!b) return;
+      if(b.dataset.c){ FLSET.ctrl=b.dataset.c; saveFlset();
+        if(FLSET.ctrl==='tilt' && typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){ try{ await DeviceOrientationEvent.requestPermission(); }catch(err){} }
+        calibrate(); st.paused=false; togglePause(); return; }
+      if(b.dataset.cal!==undefined){ calibrate(); toast('Kalibre edildi'); return; }
+      if(b.dataset.inv!==undefined){ FLSET.invert=!FLSET.invert; saveFlset(); st.paused=false; togglePause(); return; }
+      if(b.dataset.rings!==undefined){ FLSET.rings=!FLSET.rings; saveFlset(); st.paused=false; togglePause(); return; }
+      if(b.dataset.snd!==undefined){ FLSET.sound=!FLSET.sound; saveFlset(); AU&&AU.mute(!FLSET.sound); st.paused=false; togglePause(); return; }
+      if(b.dataset.resume!==undefined){ togglePause(); return; }
+      if(b.dataset.abort!==undefined){ finish({outcome:'aborted'}); return; }
+      if(b.dataset.done!==undefined){ cleanup(); resolve(st.result); return; }
+    };
+
+    // ---- arızalar ----
+    function applyFailure(f){
+      if(f.type==='rough'){ st.rough=true; st.msgs.push({t:'⚠️ Gaz tam açıkken bile güç düştü',until:st.t+4}); }
+      if(f.type==='engine_out'){ st.engineOn=false; st.msgs.push({t:'🛑 MOTOR DURDU! Süzül ve motoru çalıştırmayı dene',until:st.t+6}); }
+      if(f.type==='fuel_leak'){ st.leak=true; st.msgs.push({t:'⛽ Yakıt hızla azalıyor — en yakın piste in',until:st.t+4}); }
+      if(f.type==='asi'){ st.asiFail=true; st.msgs.push({t:'📟 Hız göstergesi arızalandı',until:st.t+5}); }
+      if(f.type==='alt'){ st.altFail=true; st.altFrozen=st.pos[1]; st.msgs.push({t:'📟 Altimetre takıldı',until:st.t+5}); }
+    }
+
+    // ---- fizik ----
+    function rotM(){ return m4mul(m4mul(m4RY(-st.psi),m4RX(st.th)),m4RZ(-st.ph)); }
+    let gustT=0, gust=[0,0,0];
+    function step(dt){
+      st.t+=dt; if(st.restartCd>0) st.restartCd-=dt;
+      // girdiler
+      let pIn=0,rIn=0;
+      if(keys['w']||keys['arrowup']) pIn-=1; if(keys['s']||keys['arrowdown']) pIn+=1;
+      if(keys['a']||keys['arrowleft']) rIn-=1; if(keys['d']||keys['arrowright']) rIn+=1;
+      if(keys['r']||keys['shift']||keys['pageup']) st.thr=clamp(st.thr+dt*0.6,0,1);
+      if(keys['f']||keys['control']||keys['pagedown']) st.thr=clamp(st.thr-dt*0.6,0,1);
+      if(FLSET.ctrl==='tilt' && coarse){ pIn+= -tilt.p; rIn+=tilt.r; }
+      else { pIn+=stick.y; rIn+=stick.x; }  // çubuğu aşağı çekmek = burun yukarı
+      if(FLSET.invert) pIn=-pIn;
+      if(st.ap){ const a=st.ap(st); if(a){ pIn=a.p; rIn=a.r; if(a.thr!=null) st.thr=a.thr; if(a.flap!=null) st.flap=a.flap; if(a.brake!=null) st.apBrake=a.brake; } }
+      pIn=clamp(pIn,-1,1); rIn=clamp(rIn,-1,1);
+      st.in.p=lerp(st.in.p,pIn,clamp(dt*8,0,1)); st.in.r=lerp(st.in.r,rIn,clamp(dt*8,0,1));
+      st.brake = !!(keys[' ']||keys['b']||brakeTouch||st.apBrake);
+      // arızalar zamanla
+      if(st.tookOff) for(const f of st.fails){ if(!f.done && st.tAir>=f.at){ f.done=true; applyFailure(f); } }
+      // rüzgâr + türbülans
+      gustT-=dt; if(gustT<=0){ gustT=0.6+Math.random()*1.2; const agl=st.pos[1]-W.heightAt(st.pos[0],st.pos[2]); const tb=(0.4+windSpd*0.12)*(agl<300?1:0.5); gust=[(Math.random()-0.5)*tb*2,(Math.random()-0.5)*tb*1.4,(Math.random()-0.5)*tb*2]; }
+      const wind = st.onGround ? vscl(windV,0.5) : vadd(windV,gust);
+      const Rm=rotM(), right=[Rm[0],Rm[1],Rm[2]], up=[Rm[4],Rm[5],Rm[6]], fwd=[-Rm[8],-Rm[9],-Rm[10]];
+      const air=vsub(st.vel,wind), V=vlen(air), airDir=V>0.5?vscl(air,1/V):fwd;
+      const alpha=V>2?Math.atan2(-vdot(air,up),vdot(air,fwd)):0;
+      const beta=V>2?Math.atan2(vdot(air,right),vdot(air,fwd)):0;
+      const q=0.5*RHO*V*V;
+      const flapCL=[0,0.35,0.7][st.flap], flapCD=[0,0.012,0.04][st.flap];
+      const aS=(15-st.flap*1.0)*D2R;
+      let CL=P.cl0+5.0*alpha+flapCL; const clMax=P.clmax+flapCL*0.75;
+      st.stall=false;
+      if(alpha>aS){ CL=Math.max(clMax*0.55, clMax-(alpha-aS)*4.5); st.stall=!st.onGround; }
+      else CL=Math.min(CL,clMax);
+      if(alpha<-12*D2R) CL=Math.max(CL,-0.6);
+      st.stallWarn = !st.onGround && alpha>aS-4*D2R && V>5;
+      const CD=P.cd0+P.k*CL*CL+flapCD+(st.stall?0.08:0);
+      const liftDir=vnorm(vcross(right,airDir));
+      let F=vadd(vscl(liftDir,q*P.S*CL), vscl(airDir,-q*P.S*CD));
+      F=vadd(F, vscl(right,-beta*q*P.S*0.6));
+      // motor
+      const engF = st.engineOn ? (st.rough? 0.55+0.1*Math.sin(st.t*7) : 1) : 0;
+      const thrust = st.thr*P.Tmax*engF*Math.max(0,1-V/P.vprop);
+      F=vadd(F, vscl(fwd,thrust));
+      F[1]-=P.mass*GRAV;
+      // yer
+      const gh=W.heightAt(st.pos[0],st.pos[2]);
+      const water=W.isWater(st.pos[0],st.pos[2]);
+      const surf = (onRunway(O,st.pos[0],st.pos[2])||onRunway(D,st.pos[0],st.pos[2])) ? 'runway' : (water?'water':'grass');
+      const groundY = (surf==='runway'?0.05:gh) + P.hg;
+      if(st.onGround){
+        const vH=vlen([st.vel[0],0,st.vel[2]]);
+        const mu=(surf==='runway'?0.022:0.07)+(st.brake?(surf==='runway'?0.42:0.3):0);
+        const N=Math.max(0,P.mass*GRAV-Math.max(0,vdot(liftDir,[0,1,0])*q*P.S*CL));
+        if(vH>0.05){ const fr=Math.min(mu*N, vH*P.mass/dt*0.9); F=vadd(F, vscl([st.vel[0],0,st.vel[2]],-fr/vH)); }
+        else if(thrust<mu*N){ st.vel[0]=st.vel[2]=0; }
+      }
+      // entegrasyon
+      st.vel=vadd(st.vel,vscl(F,dt/P.mass));
+      if(st.onGround){
+        // yanal kaymayı yok et (tekerlek)
+        const lat=vdot(st.vel,right); st.vel=vsub(st.vel,vscl(right,lat*clamp(dt*12,0,1)));
+        if(st.vel[1]<0) st.vel[1]=0;
+      }
+      const agl0=st.pos[1]-groundY;
+      const dO=Math.hypot(st.pos[0]-O.x,st.pos[2]-O.z), dDst=Math.hypot(st.pos[0]-D.x,st.pos[2]-D.z);
+      st.compress = !st.onGround && agl0>150 && dO>2000 && dDst>APP_GATE+700 && !st.stall;
+      const K=st.compress?COMPRESS:1;
+      const dpos=[st.vel[0]*dt*K, st.vel[1]*dt, st.vel[2]*dt*K];
+      st.pos=vadd(st.pos,dpos);
+      const legKm=opts.distKm||100;
+      st.distReal += Math.hypot(dpos[0],dpos[2])/SIM_D*legKm;
+      // yakıt (gerçek km bazlı + rölanti)
+      const burnKm=opts.perKm*Math.hypot(dpos[0],dpos[2])/SIM_D*legKm*(0.55+0.6*st.thr)/(0.55+0.6*0.75);
+      const idle=opts.perKm*0.02*dt*(st.engineOn?1:0);
+      st.fuel-= (burnKm+idle)*(st.leak?3:1)*(st.engineOn?1:0.2);
+      if(st.fuel<=0){ st.fuel=0; if(st.engineOn){ st.engineOn=false; st.msgs.push({t:'⛽ YAKIT BİTTİ!',until:st.t+6}); } }
+      // dönüş dinamiği
+      const e=clamp((V/(P.vr*1.1))**2,0,1.4);
+      if(!st.onGround){
+        st.ph += (st.in.r*P.roll*e - st.ph*0.12*e)*dt;
+        if(st.stall && Math.random()<dt*2) st.ph+=(Math.random()-0.5)*0.4;
+        st.ph=clamp(st.ph,-75*D2R,75*D2R);
+        const aTrim=0.035;
+        st.th += (st.in.p*P.pitch*e + P.stab*Math.min(e,1)*(aTrim-alpha)*Math.cos(st.ph))*dt;
+        // yön hava akışını izler
+        const hdgAir=Math.atan2(air[0],-air[2]);
+        st.psi += angDiff(hdgAir,st.psi)*clamp(3*e,0,4)*dt;
+        st.th=clamp(st.th,-60*D2R,60*D2R);
+      } else {
+        const vG=vlen([st.vel[0],0,st.vel[2]]);
+        st.psi += st.in.r*0.5*clamp(vG/6,0,1)*clamp(12/(vG+1),0.15,1)*dt;
+        // yerde hız yönü burunla aynı
+        const sp=vdot(st.vel,fwd); const hv=[Math.sin(st.psi)*sp,0,-Math.cos(st.psi)*sp];
+        st.vel=[lerp(st.vel[0],hv[0],clamp(dt*6,0,1)),st.vel[1],lerp(st.vel[2],hv[2],clamp(dt*6,0,1))];
+        const rot=st.in.p*P.pitch*e*0.9 + (st.th>0? -0.25*(1-e*0.6):0);
+        st.th=clamp(st.th+rot*dt,0,13*D2R);
+        st.ph*=Math.max(0,1-dt*8);
+      }
+      // yere temas
+      const gy=groundY;
+      if(st.pos[1]<=gy){
+        if(!st.onGround){ touchdown(surf,gh); if(st.done) return; }
+        st.pos[1]=gy; st.onGround=true; if(st.vel[1]<0) st.vel[1]=0;
+      } else if(st.onGround && st.pos[1]>gy+0.05){
+        st.onGround=false;
+      }
+      if(!st.onGround){ st.tAir+= dt; st.airTime+=dt; if(st.airTime>1.5 && agl0>8) st.tookOff=true; }
+      else st.airTime=0;
+      st.maxAlt=Math.max(st.maxAlt,agl0);
+      // çarpışma: arazi eğimi dik ve havada
+      if(!st.onGround){
+        const tgh=W.heightAt(st.pos[0],st.pos[2]);
+        if(st.pos[1]<tgh+0.5 && surf!=='runway'){ crash('Araziye çarptın'); return; }
+      }
+      // yerde: pist dışı hızlı gidiş
+      if(st.onGround && surf==='grass'){ const vG=vlen(st.vel); if(vG>12){ st.groundRoughT+=dt; st.shake=Math.max(st.shake,0.3); if(st.groundRoughT>0.3 && vG>38){ crash('Pist dışında çok hızlı gittin'); return; } } }
+      if(st.onGround && surf==='water'){ crash('Uçak suya gömüldü'); return; }
+      // varış / durma kontrolü
+      if(st.onGround && st.tookOff){
+        const vG=vlen(st.vel);
+        if(vG<2.5){
+          if(onRunway(D,st.pos[0],st.pos[2],30)) finish({outcome:'landed'});
+          else if(onRunway(O,st.pos[0],st.pos[2],30)) finish({outcome:'returned'});
+          else finish({outcome:'forced', nearDest: dDst<3500});
+        }
+      }
+      if(!st.tookOff && st.onGround && !onRunway(O,st.pos[0],st.pos[2],40) && vlen(st.vel)<2){ /* çimde durdu: sorun yok */ }
+    }
+    function touchdown(surf,gh){
+      const vs=-st.vel[1], V=vlen(st.vel), bank=Math.abs(st.ph)/D2R, pitch=st.th/D2R;
+      st.lastTouch={vs,V,bank,pitch,surf};
+      if(!st.tookOff) return;
+      AU&&AU.thump(Math.min(1,vs/3));
+      st.shake=Math.max(st.shake,Math.min(1,vs/3));
+      if(surf==='water'){ crash('Suya indin'); return; }
+      if(vs>5 || bank>20 || pitch< -4){ crash(vs>5?'Çok sert çarptın ('+Math.round(vs*FPM)+' fpm)':(bank>20?'Kanat yere sürttü':'Burun tekerleğiyle çakıldın')); return; }
+      if(surf==='grass' && (vs>3.5 || V>42)){ crash('Arazi çok engebeli, uçak devrildi'); return; }
+      let dmg=0; if(vs>3.2) dmg=18; else if(vs>2) dmg=6; if(surf==='grass') dmg+=12;
+      st.damage.airframe+=dmg;
+      st.landingVs=Math.max(st.landingVs||0, vs);
+      if(!st.firstTouchVs) st.firstTouchVs=vs;
+    }
+    function crash(why){
+      if(st.done) return;
+      st.vel=[0,0,0]; st.damage.airframe+=60; st.damage.engine+=30; st.damage.inst+=20;
+      AU&&AU.thump(1); st.shake=1.5;
+      finish({outcome:'crash', why});
+    }
+    function landingText(vs){
+      const fpm=Math.round(vs*FPM);
+      if(vs<1) return `🧈 Yağ gibi! (${fpm} fpm)`; if(vs<2) return `👍 Güzel iniş (${fpm} fpm)`; if(vs<3.2) return `😬 Sert iniş (${fpm} fpm)`; return `💥 Çok sert! (${fpm} fpm)`;
+    }
+    function finish(r){
+      if(st.done) return; st.done=true;
+      // aşınma uçuşu
+      const res={...r, fuelLeft:Math.max(0,st.fuel), damage:st.damage, tookOff:st.tookOff, vs:st.firstTouchVs||0, distReal:st.distReal};
+      st.result=res;
+      const titles={landed:'✅ '+D.name+' — iniş başarılı', returned:'↩️ Kalkış yerine geri döndün', forced:'🌾 Zorunlu iniş', crash:'💥 KAZA', aborted:'Uçuş iptal'};
+      let body='';
+      if(r.outcome==='landed'||r.outcome==='returned') body=`<p style="font-size:18px"><b>${landingText(st.firstTouchVs||0)}</b></p>`;
+      if(r.outcome==='forced') body=`<p>Uçak pist dışına indi. ${r.nearDest?'Hedefe yakın olduğun için çekiciyle havalimanına götürülecek.':'Çekiciyle kalkış noktasına geri götürülecek.'}</p>`;
+      if(r.outcome==='crash') body=`<p><b>${r.why}</b></p><p>Uçak ağır hasar aldı ve kalkış noktasına çekilecek. Yükün kayboldu.</p>`;
+      if(r.outcome!=='aborted' && r.outcome!=='crash' && st.damage.airframe>0) body+=`<p class="muted">Gövde hasarı: -${Math.round(st.damage.airframe)}</p>`;
+      if(r.outcome==='aborted'){ cleanup(); resolve(res); return; }
+      cardIn.innerHTML=`<h2>${titles[r.outcome]}</h2>${body}<p class="muted">Kalan yakıt: ${Math.round(st.fuel)} L</p><button class="btn primary" style="width:100%" data-done>Devam</button>`;
+      setTimeout(()=>card.classList.add('on'), r.outcome==='crash'?900:600);
+    }
+    function cleanup(){
+      cancelAnimationFrame(raf); el.classList.remove('on'); card.classList.remove('on');
+      removeEventListener('keydown',kd,true); removeEventListener('keyup',ku,true); removeEventListener('deviceorientation',onOri); el.removeEventListener('wheel',onWheel);
+      hc.removeEventListener('pointerdown',pd); hc.removeEventListener('pointermove',pm); hc.removeEventListener('pointerup',pu); hc.removeEventListener('pointercancel',pu);
+      AU&&AU.close();
+      const lose=gl.getExtension('WEBGL_lose_context'); lose&&lose.loseContext();
+    }
+
+    // ---- çizim ----
+    let VW=0,VH=0,DPR=1;
+    function resize(){ DPR=Math.min(devicePixelRatio||1, coarse?1.5:2); VW=innerWidth; VH=innerHeight; glc.width=VW*DPR; glc.height=VH*DPR; hc.width=VW*DPR; hc.height=VH*DPR; }
+    resize(); addEventListener('resize',resize);
+    let camDt=0.016;
+    function render(){
+      gl.viewport(0,0,glc.width,glc.height);
+      gl.clearColor(W.fogC[0],W.fogC[1],W.fogC[2],1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+      const Rm=rotM(), up=[Rm[4],Rm[5],Rm[6]], fwd=[-Rm[8],-Rm[9],-Rm[10]];
+      let eye,tgt,cup=[0,1,0],near=1.0,fov=62;
+      const shk=st.shake*0.4; const sh=[(Math.random()-0.5)*shk,(Math.random()-0.5)*shk,(Math.random()-0.5)*shk];
+      if(st.cam==='chase'){
+        const k=1-Math.exp(-camDt*3.5);
+        st.camHdg = st.camHdg==null ? st.psi : st.camHdg + angDiff(st.psi,st.camHdg)*k;
+        st.camPitch = lerp(st.camPitch||0, clamp(st.th,-0.5,0.5)*0.5, k);
+        const hf=[Math.sin(st.camHdg),0,-Math.cos(st.camHdg)]; const dist=P.len*1.35+5;
+        let cp=vadd(vadd(st.pos,vscl(hf,-dist*Math.cos(st.camPitch))),[0,P.len*0.32+1.6+dist*Math.sin(st.camPitch)*-1,0]);
+        const camG=W.heightAt(cp[0],cp[2])+1.5; if(cp[1]<camG) cp[1]=camG;
+        eye=vadd(cp,sh); tgt=vadd(vadd(st.pos,vscl(hf,P.len*1.2)),[0,1.2,0]);
+      } else {
+        const ek = opts.model==='kingair'?[0,1.05,-4.3]:(opts.model==='c172'?[0,0.82,-1.6]:[0,0.78,-1.5]);
+        eye=vadd(vadd(st.pos,m4xv(Rm,ek)),sh); const fv=m4xv(Rm,[0,-0.08,-1]); tgt=vadd(eye,fv); cup=up; near=0.3; fov=72;
+      }
+      const proj=m4persp(fov*D2R,VW/VH,near,30000), view=m4look(eye,tgt,cup), VP=m4mul(proj,view);
+      gl.uniformMatrix4fv(R.U.uVP,false,VP); gl.uniform3fv(R.U.uCam,eye); gl.uniform3fv(R.U.uL,vnorm([0.4,0.85,0.3])); gl.uniform3fv(R.U.uFogC,W.fogC); gl.uniform1f(R.U.uFogD,1/11000);
+      drawMesh(R,W.sky,m4T(eye[0],eye[1]-200,eye[2]),{em:1,fog:false,noCull:true,noDepth:true});
+      drawMesh(R,W.far,null,{});
+      if(W.sea) drawMesh(R,W.sea,null,{offset:-1});
+      drawMesh(R,W.terrain,null,{});
+      drawMesh(R,W.runway,null,{offset:-2});
+      drawMesh(R,W.marks,null,{offset:-4,em:0.3});
+      drawMesh(R,W.bld,null,{});
+      drawMesh(R,W.trees,null,{});
+      // rüzgâr tulumu
+      for(const ap of [O,D]){ const p=ap.at(250,-ap.wid/2-25,7.6); const wdir=Math.atan2(windV[0],-windV[2]); drawMesh(R,W.sock,m4mul(m4T(p[0],p[1],p[2]),m4mul(m4RY(-wdir),m4RX(-(1-Math.min(1,windSpd/7))*1.2))),{}); }
+      // PAPI
+      const pc=W.papiPos[0]; const hd=Math.hypot(st.pos[0]-pc[0],st.pos[2]-pc[2]); const ang=Math.atan2(st.pos[1]-P.hg-1,hd)/D2R;
+      const thr=[3.5,3.17,2.83,2.5];
+      W.papiPos.forEach((p,i)=>{ const white=ang>thr[i]; drawMesh(R,W.papiBox,m4T(p[0],p[1],p[2]),{tint:white?[1,1,1,1]:[1,0.12,0.1,1],em:1,fog:false}); });
+      if(FLSET.rings) drawMesh(R,W.rings,null,{em:0.85,noCull:true,alpha:0.75});
+      // gölge
+      const gh=W.heightAt(st.pos[0],st.pos[2]), onR=onRunway(O,st.pos[0],st.pos[2])||onRunway(D,st.pos[0],st.pos[2]);
+      const gY=(onR?0.05:gh)+0.15, agl=st.pos[1]-gY;
+      if(agl<300) drawMesh(R,W.shadow,m4mul(m4T(st.pos[0],gY,st.pos[2]),m4mul(m4RY(-st.psi),m4S(PL.span*0.9,1,P.len))),{alpha:0.32*(1-agl/300),offset:-6});
+      // uçak
+      const M=m4mul(m4T(st.pos[0],st.pos[1],st.pos[2]),Rm);
+      if(st.cam==='chase') drawMesh(R,PL.body,M,{});
+      for(const pp of PL.props) drawMesh(R,PL.prop,m4mul(M,m4mul(m4T(pp[0],pp[1],pp[2]),m4RZ(st.propA))),{});
+      drawMesh(R,W.clouds,null,{em:0.55});
+    }
+
+    // ---- HUD ----
+    let hintTxt='';
+    function setHint(t){ if(t!==hintTxt){ hintTxt=t; document.getElementById('flHint').textContent=t; } }
+    let warnKey='';
+    function hud(){
+      const c=hx; c.setTransform(DPR,0,0,DPR,0,0); c.clearRect(0,0,VW,VH);
+      if(st.cam==='cockpit'){
+        // basit kokpit çerçevesi: alt panel + cam dikmeleri
+        const ph=VH*0.2; const g=c.createLinearGradient(0,VH-ph,0,VH); g.addColorStop(0,'#2b2f35'); g.addColorStop(1,'#1b1e22');
+        c.fillStyle=g; c.beginPath(); c.moveTo(0,VH); c.lineTo(0,VH-ph*0.8); c.quadraticCurveTo(VW/2,VH-ph*1.25,VW,VH-ph*0.8); c.lineTo(VW,VH); c.fill();
+        c.fillStyle='#3a3f46'; c.beginPath(); c.moveTo(0,0); c.lineTo(VW*0.07,0); c.lineTo(VW*0.02,VH*0.8); c.lineTo(0,VH*0.8); c.fill();
+        c.beginPath(); c.moveTo(VW,0); c.lineTo(VW*0.93,0); c.lineTo(VW*0.98,VH*0.8); c.lineTo(VW,VH*0.8); c.fill();
+        if(opts.model!=='kingair'){ c.fillStyle='#d9d6cc'; c.fillRect(0,0,VW,VH*0.035); }
+      }
+      const V=vlen(st.vel), ktV=Math.round(vlen(vsub(st.vel,windV))*KT);
+      const gh=W.heightAt(st.pos[0],st.pos[2]);
+      const altFt=Math.round((st.altFail?st.altFrozen:st.pos[1]-P.hg)*FT);
+      const aglFt=Math.round((st.pos[1]-P.hg-Math.max(0,gh))*FT);
+      st.vsDisp=lerp(st.vsDisp,st.vel[1]*FPM,0.1);
+      const mid=VW/2, top=Math.max(60, VH*0.08)+ (coarse?0:0);
+      // hız kutusu
+      const box=(x,y,w,label,val,col)=>{ c.fillStyle='rgba(15,22,30,.72)'; c.strokeStyle='#fff'; c.lineWidth=2; c.beginPath(); c.roundRect?c.roundRect(x,y,w,52,10):c.rect(x,y,w,52); c.fill(); c.stroke();
+        c.fillStyle='#bcd'; c.font='bold 11px system-ui'; c.textAlign='left'; c.fillText(label,x+8,y+15); c.fillStyle=col||'#fff'; c.font='bold 24px system-ui'; c.fillText(val,x+8,y+42); };
+      const spdCol = st.stallWarn?'#ff5a4f':(ktV>P.vr*KT*0.95?'#fff':'#ffd27a');
+      const bx=coarse?12:20, by=coarse?Math.max(70,VH*0.18):Math.max(70,VH*0.3);
+      box(bx,by,96,'HIZ (KT)', st.asiFail?'---':String(ktV), st.asiFail?'#ff8a80':spdCol);
+      box(VW-bx-110,by,110,'İRTİFA (FT)', String(altFt), st.altFail?'#ff8a80':'#fff');
+      c.fillStyle='rgba(15,22,30,.72)'; c.fillRect(VW-bx-110,by+56,110,20); c.fillStyle='#fff'; c.font='bold 12px system-ui'; c.textAlign='left';
+      c.fillText((st.vsDisp>=0?'↑ ':'↓ ')+Math.abs(Math.round(st.vsDisp/10)*10)+' fpm',VW-bx-104,by+70);
+      c.fillStyle='rgba(15,22,30,.72)'; c.fillRect(bx,by+56,96,20); c.fillStyle='#fff'; c.fillText('AGL '+Math.max(0,aglFt)+' ft',bx+6,by+70);
+      // yapay ufuk + pusula
+      const ar=coarse?40:56, ax=mid, ay=(VW<560? 118 : top+66);
+      c.save(); c.beginPath(); c.arc(ax,ay,ar,0,7); c.clip();
+      c.translate(ax,ay); c.rotate(-st.ph); const po=st.th/D2R*ar/30;
+      c.fillStyle='#3d8fd6'; c.fillRect(-ar*2,-ar*2+po,ar*4,ar*2); c.fillStyle='#8a5a2b'; c.fillRect(-ar*2,po,ar*4,ar*2);
+      c.strokeStyle='#fff'; c.lineWidth=2; c.beginPath(); c.moveTo(-ar*2,po); c.lineTo(ar*2,po); c.stroke();
+      c.lineWidth=1; for(const pd of [-20,-10,10,20]){ const yy=po-pd*ar/30; c.beginPath(); c.moveTo(-ar*0.25,yy); c.lineTo(ar*0.25,yy); c.stroke(); }
+      c.restore();
+      c.strokeStyle='#fff'; c.lineWidth=3; c.beginPath(); c.arc(ax,ay,ar,0,7); c.stroke();
+      c.strokeStyle='#ffcc33'; c.lineWidth=4; c.beginPath(); c.moveTo(ax-ar*0.6,ay); c.lineTo(ax-ar*0.18,ay); c.lineTo(ax-ar*0.1,ay+6); c.moveTo(ax+ar*0.6,ay); c.lineTo(ax+ar*0.18,ay); c.lineTo(ax+ar*0.1,ay+6); c.stroke();
+      // ILS (yaklaşmada)
+      const L=rwyLocal(D,st.pos[0],st.pos[2]); const s=-L.a;
+      if(s>200 && s<9000){
+        const locDev=clamp(Math.atan2(L.b,s)/D2R/2.5,-1,1); // ±2.5° tam sapma
+        const gsDev=clamp((Math.atan2(st.pos[1]-P.hg-15,s)/D2R-3)/0.7,-1,1);
+        c.fillStyle='#ff4fd8'; c.beginPath(); c.arc(ax-locDev*ar*0.85,ay+ar-8,5,0,7); c.fill();
+        c.beginPath(); c.arc(ax+ar-8,ay+gsDev*ar*0.85,5,0,7); c.fill();
+      }
+      // pusula
+      const hdg=((st.psi/D2R)%360+360)%360;
+      const brg=((Math.atan2(D.x-st.pos[0],-(D.z-st.pos[2]))/D2R)%360+360)%360;
+      const gate=D.at(-APP_GATE,0); const tgtB = s>APP_GATE+300? ((Math.atan2(gate[0]-st.pos[0],-(gate[2]-st.pos[2]))/D2R)%360+360)%360 : ((D.hdg/D2R - clamp(L.b*0.006,-0.6,0.6)/D2R)%360+360)%360;
+      c.fillStyle='rgba(15,22,30,.72)'; const cw=VW<560?148:170; c.fillRect(ax-cw/2,ay+ar+8,cw,40);
+      c.fillStyle='#fff'; c.font='bold 14px system-ui'; c.textAlign='center';
+      const dd=Math.hypot(D.x-st.pos[0],D.z-st.pos[2]), gR=APP_GATE+700, legK=opts.distKm||100;
+      const kmLeft = dd>gR ? gR/1000 + (dd-gR)/(SIM_D-gR)*Math.max(0,legK-gR/1000) : dd/1000;
+      c.font=(VW<560?'bold 13px':'bold 14px')+' system-ui'; c.fillText(`YÖN ${String(Math.round(hdg)).padStart(3,'0')}° · ${kmLeft.toFixed(kmLeft<10?1:0)} km`,ax,ay+ar+24);
+      const db=angDiff(tgtB*D2R,hdg*D2R)/D2R;
+      c.fillStyle= Math.abs(db)<5?'#7dffa0':'#ffcc33'; c.font='bold 13px system-ui';
+      c.fillText(Math.abs(db)<5?'▲ Rota doğru':(db>0?'Sağa dön ▶ '+Math.round(db)+'°':'◀ Sola dön '+Math.round(-db)+'°'),ax,ay+ar+41);
+      // alt durum satırı
+      const fuelPct=st.fuel/st.fuelCap;
+      const lines=[`⛽ ${Math.round(st.fuel)} L`, `FLAP ${st.flap}`, `Rüzgâr ${String(Math.round(windFrom/D2R)).padStart(3,'0')}°/${Math.round(windSpd*KT)} kt`];
+      c.textAlign='right'; c.font='bold 12px system-ui';
+      lines.forEach((t,i)=>{ c.fillStyle='rgba(15,22,30,.6)'; const w=c.measureText(t).width+12; c.fillRect(VW-bx-w,by+82+i*20,w,18); c.fillStyle=(i===0&&fuelPct<0.15)?'#ff8a80':'#fff'; c.fillText(t,VW-bx-6,by+95+i*20); });
+      if(st.compress){ c.textAlign='center'; c.fillStyle='rgba(255,204,51,.9)'; c.font='bold 15px system-ui'; c.fillText('⏩ Hızlı seyir ×'+COMPRESS,mid,ay+ar+64); }
+      // gaz göstergesi
+      flapBtn.textContent='FLAP '+st.flap;
+      document.getElementById('flThrFill').style.height=`calc(${st.thr*100}% - ${st.thr*12}px)`;
+      document.getElementById('flThrLbl').textContent='GAZ '+Math.round(st.thr*100)+'%';
+      // joystick
+      if(stick.id!==null){ c.fillStyle='rgba(255,248,236,.18)'; c.strokeStyle='rgba(255,255,255,.7)'; c.lineWidth=3; c.beginPath(); c.arc(stick.ox,stick.oy,70,0,7); c.fill(); c.stroke(); c.fillStyle='rgba(255,248,236,.9)'; c.beginPath(); c.arc(stick.ox+stick.x*70,stick.oy+stick.y*70,26,0,7); c.fill(); }
+      else if(coarse && FLSET.ctrl!=='tilt'){ c.strokeStyle='rgba(255,255,255,.4)'; c.lineWidth=2; c.beginPath(); c.arc(VW-110,VH-130,60,0,7); c.stroke(); c.fillStyle='rgba(255,255,255,.55)'; c.font='bold 12px system-ui'; c.textAlign='center'; c.fillText('Kumanda',VW-110,VH-126); }
+      // uyarılar
+      const W2=[];
+      if(st.stallWarn) W2.push(['STALL! Burnu indir',1]);
+      if(!st.engineOn) W2.push([st.fuel<=0?'YAKIT YOK':'MOTOR DURDU',1]);
+      if(st.rough&&st.engineOn) W2.push(['MOTOR TEKLİYOR',0]);
+      if(st.leak) W2.push(['YAKIT KAÇAĞI',0]);
+      if(fuelPct<0.12&&st.fuel>0) W2.push(['YAKIT AZ',0]);
+      if(!st.onGround && aglFt<250 && st.vsDisp<-1200) W2.push(['PULL UP!',1]);
+      for(const m of st.msgs) if(m.until>st.t) W2.push([m.t,0]);
+      W2.splice(4);
+      const key=W2.map(w=>w[0]).join('|');
+      if(key!==warnKey){ warnKey=key; document.getElementById('flWarn').innerHTML=W2.map(w=>`<div class="${w[1]?'':'amber'}">${w[0]}</div>`).join(''); }
+      restartBtn.style.display = (!st.engineOn && st.fuel>0 && !st.done) ? 'block':'none';
+      // ipucu
+      const ktR=Math.round(P.vr*KT);
+      let h='';
+      if(!st.tookOff){ h = st.thr<0.9 ? 'Gazı tamamen aç' + (coarse?' (soldaki GAZ çubuğu)':' (R tuşu)') : (ktV<ktR ? `Hızlan… ${ktR} kt'da çubuğu kendine çek` : 'Şimdi çubuğu kendine çek ve kalk!'); }
+      else if(st.onGround) h='Fren yap ve dur';
+      else if(s>APP_GATE && aglFt<500) h='Tırmanmaya devam et (500 ft üstünde hızlı seyir başlar)';
+      else if(s>APP_GATE) h = st.compress ? 'Hızlı seyir — rotayı tut' : 'Rotayı takip et';
+      else if(s>0) h='Yaklaşma: halkalardan geç, gazı azalt, flap aç, hız ~'+Math.round(P.vr*KT*1.25)+' kt';
+      else h='Pistin üzerindesin — burnu hafif kaldır, yumuşak koy';
+      setHint(h);
+    }
+
+    // ---- döngü ----
+    let last=performance.now(), raf=0, acc=0;
+    function frame(now){
+      const dt=Math.min(0.05,(now-last)/1000); last=now;
+      if(!st.paused && !st.done){
+        acc+=dt*(st.timeScale||1); const h=1/120; let n=0;
+        while(acc>=h && n<480){ step(h); acc-=h; n++; if(st.done) break; }
+        if(st.done) acc=0;
+      }
+      st.shake=Math.max(0,st.shake-dt*1.5)+(st.rough&&st.engineOn?0.05:0);
+      const rpmT = st.engineOn ? 0.22+0.78*st.thr : Math.min(0.25,vlen(st.vel)/90);
+      st.rpm=lerp(st.rpm,rpmT,0.05); st.propA+= st.rpm*dt*60;
+      AU && AU.set(st.paused||st.done?0:st.rpm*(st.rough&&st.engineOn?(0.85+0.15*Math.sin(st.t*9)):1), st.paused?0:vlen(st.vel), st.stallWarn&&!st.paused, st.t);
+      camDt=dt; render(); hud();
+      raf=requestAnimationFrame(frame);
+    }
+    raf=requestAnimationFrame(frame);
+    // test erişimi
+    window.__fl={st,O,D,W,P,finish,setAP:f=>st.ap=f};
+  });
+}
+
 </script>
 </body>
 </html>
