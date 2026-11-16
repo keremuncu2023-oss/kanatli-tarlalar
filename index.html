@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#2f6b3a">
+<title>Kanatlı Tarlalar</title>
+<style>
+  :root{--ui:#fff8ec;--ink:#3b2a1a;--accent:#e8913a;--green:#4c9a3f;--line:#c9a875}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:#2f6b3a;font-family:"Trebuchet MS",system-ui,sans-serif;color:var(--ink);user-select:none;-webkit-user-select:none}
+  canvas{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+  .hud{position:fixed;z-index:5;display:flex;gap:8px;align-items:center}
+  .pill{background:var(--ui);border:3px solid var(--ink);border-radius:14px;padding:6px 12px;font-weight:700;font-size:16px;box-shadow:0 3px 0 rgba(0,0,0,.35)}
+  .btn{background:var(--ui);border:3px solid var(--ink);border-radius:14px;min-width:46px;height:46px;font-size:20px;font-weight:700;color:var(--ink);box-shadow:0 3px 0 rgba(0,0,0,.35);cursor:pointer;padding:0 10px;font-family:inherit}
+  .btn:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(0,0,0,.35)}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn:disabled{opacity:.5}
+  #topL{top:calc(10px + env(safe-area-inset-top));left:10px}
+  #topR{top:calc(10px + env(safe-area-inset-top));right:10px}
+  #hotbar{bottom:calc(12px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--ui);border:3px solid var(--ink);border-radius:16px;padding:5px;gap:5px;box-shadow:0 3px 0 rgba(0,0,0,.35);max-width:calc(100vw - 20px);overflow-x:auto}
+  .slot{width:48px;height:48px;border-radius:10px;border:2px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:22px;line-height:1;position:relative;cursor:pointer;flex:0 0 auto;background:#fff}
+  .slot small{font-size:12px;font-weight:700;margin-top:2px}
+  .slot.sel{border-color:var(--accent);background:#ffe7c9;box-shadow:inset 0 0 0 2px var(--accent)}
+  .slot.empty{opacity:.45}
+  #action{position:fixed;z-index:6;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));min-width:96px;height:64px;border-radius:20px;font-size:17px;display:none}
+  #toast{position:fixed;z-index:20;top:calc(64px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:rgba(40,25,10,.88);color:#fff;padding:8px 14px;border-radius:12px;font-weight:700;font-size:15px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
+  #toast.on{opacity:1}
+  .modal{position:fixed;inset:0;z-index:30;background:rgba(20,30,15,.55);display:none;align-items:center;justify-content:center;padding:14px}
+  .modal.on{display:flex}
+  .card{background:var(--ui);border:4px solid var(--ink);border-radius:20px;padding:16px;width:min(440px,100%);max-height:88vh;overflow:auto;box-shadow:0 6px 0 rgba(0,0,0,.35)}
+  .card h2{margin:0 0 10px;font-size:22px}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:2px dashed #e2cfa8}
+  .row:last-child{border-bottom:0}
+  .row .grow{flex:1}
+  .row .em{font-size:26px;width:34px;text-align:center}
+  .muted{opacity:.7;font-size:13px}
+  .tabs{display:flex;gap:6px;margin-bottom:8px}
+  .tab{flex:1;height:40px;font-size:15px}
+  .tab.on{background:var(--accent);color:#fff}
+  input[type=text]{width:100%;font-size:18px;padding:10px 12px;border:3px solid var(--ink);border-radius:12px;font-family:inherit;background:#fff}
+  .swatches{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .sw{width:36px;height:36px;border-radius:50%;border:3px solid var(--ink);cursor:pointer}
+  .sw.on{outline:4px solid var(--accent);outline-offset:2px}
+  #chatBar{position:fixed;z-index:25;left:10px;right:10px;bottom:calc(84px + env(safe-area-inset-bottom));display:none;gap:6px}
+  #chatBar.on{display:flex}
+  #chatLog{position:fixed;z-index:4;left:10px;top:calc(64px + env(safe-area-inset-top));max-width:min(320px,70vw);font-size:13px;pointer-events:none}
+  #chatLog div{background:rgba(255,248,236,.85);border-radius:8px;padding:3px 8px;margin-bottom:3px;width:fit-content;max-width:100%;overflow-wrap:anywhere}
+  #login .title{font-size:30px;font-weight:900;text-align:center;margin:0 0 4px;color:var(--green);text-shadow:2px 2px 0 var(--ink)}
+  @media (max-width:560px){
+    .hud{gap:5px}
+    .pill{font-size:14px;padding:5px 8px;border-radius:12px}
+    #topR .btn{min-width:40px;height:40px;font-size:17px;padding:0 6px;border-radius:12px}
+    .wide{display:none}
+    #toast{top:calc(62px + env(safe-area-inset-top))}
+  }
+  .badge{display:inline-block;padding:2px 8px;border-radius:8px;font-size:12px;font-weight:700;color:#fff}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud" id="topL">
+  <div class="pill" id="money">💰 0</div>
+  <div class="pill" id="size">🟫 9</div>
+</div>
+<div class="hud" id="topR">
+  <div class="pill" id="online" title="Çevrimiçi oyuncular">👥 1</div>
+  <button class="btn" id="bHome" title="Tarlama git">🏠</button>
+  <button class="btn" id="bBoard" title="Zenginler listesi">🏆</button>
+  <button class="btn" id="bChat" title="Sohbet">💬</button>
+</div>
+<div id="chatLog"></div>
+<div class="hud" id="hotbar"></div>
+<button class="btn primary" id="action"></button>
+<div id="toast"></div>
+<div id="chatBar"><input type="text" id="chatIn" maxlength="80" placeholder="Bir şey yaz…" enterkeyhint="send"><button class="btn primary" id="chatSend">➤</button></div>
+
+<!-- Giriş -->
+<div class="modal on" id="login"><div class="card">
+  <p class="title">🌾 Kanatlı Tarlalar ✈️</p>
+  <p class="muted" style="text-align:center;margin-top:0">Tarlanı büyüt, uçağını al, en zengin çiftçi ol.</p>
+  <label><b>Adın</b></label>
+  <input type="text" id="nameIn" maxlength="14" placeholder="Örn. Kerem">
+  <div class="swatches" id="swatches"></div>
+  <button class="btn primary" id="play" style="width:100%;height:54px;font-size:20px">Oyna</button>
+  <p class="muted" id="modeInfo" style="text-align:center;margin-bottom:0"></p>
+  <p class="muted" style="margin-bottom:0">📱 Sol alt köşeden sürükleyerek yürü, tarlaya dokunarak ek veya hasat et.<br>💻 WASD / ok tuşları ile yürü, E veya boşluk ile etkileşime geç, tıklayarak ek.</p>
+</div></div>
+
+<!-- Pazar / Hangar / Liste -->
+<div class="modal" id="panel"><div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between"><h2 id="pTitle"></h2><button class="btn" id="pClose">✕</button></div>
+  <div id="pBody"></div>
+</div></div>
+
+<script type="module">
+/* ============================================================
+   FIREBASE AYARI
+   Firebase konsolundan aldığın config nesnesini aşağıya yapıştır.
+   Boş bırakırsan oyun tek kişilik TEST MODUNDA çalışır.
+   ============================================================ */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBpk9IfRk2xMkwWZ420JaaJBpn-T3Wgu9M",
+  authDomain: "kanatli-tarlalar.firebaseapp.com",
+  databaseURL: "https://kanatli-tarlalar-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "kanatli-tarlalar",
+  storageBucket: "kanatli-tarlalar.firebasestorage.app",
+  messagingSenderId: "901318029281",
+  appId: "1:901318029281:web:f48848debd965a4ebcaca0",
+};
+const FB_VER = "10.12.2";
+
+/* ---------------- Oyun verileri ---------------- */
+const CROPS = {
+  bugday:  {ad:'Buğday',  em:'🌾', tohum:5,   sure:60e3,    fiyat:12,  renk:'#e8c547', kilit:0},
+  havuc:   {ad:'Havuç',   em:'🥕', tohum:15,  sure:180e3,   fiyat:35,  renk:'#f08a24', kilit:0},
+  domates: {ad:'Domates', em:'🍅', tohum:40,  sure:600e3,   fiyat:100, renk:'#e0412f', kilit:12},
+  misir:   {ad:'Mısır',   em:'🌽', tohum:90,  sure:1800e3,  fiyat:240, renk:'#f5d33a', kilit:20},
+  cilek:   {ad:'Çilek',   em:'🍓', tohum:200, sure:7200e3,  fiyat:650, renk:'#e83a5a', kilit:30},
+};
+const CROP_IDS = Object.keys(CROPS);
+const COLORS = ['#e2504c','#3d7fe0','#f2b134','#8e5bd8','#2fa86a','#ec6fb0','#20b5c4','#7a5233'];
+const MAX_W = 10, MAX_H = 8, MONEY_MAX_W = 6, MONEY_MAX_H = 6; // 6x6 sonrası şehirden malzeme gerekecek
+const START = () => ({money:50, w:3, h:3, plots:{}, seeds:{bugday:5}, crops:{}, plane:null});
+const expandCost = p => Math.round(60*Math.pow(1.5,(p.w-3)+(p.h-3))/10)*10;
+const nextSize = p => ((p.w-3) <= (p.h-3) && p.w < MAX_W) ? {w:p.w+1,h:p.h} : (p.h < MAX_H ? {w:p.w,h:p.h+1} : {w:p.w+1,h:p.h});
+
+/* ---------------- Harita ---------------- */
+const T = 32, MW = 86, MH = 80;
+const G=0, PATH=1, WATER=2, TREE=3, BLD=4, RUN=5, LOT=6, FENCE=7, PLAZA=8, FLOWER=9;
+const SOLID = new Set([WATER,TREE,BLD,FENCE]);
+const tiles = new Uint8Array(MW*MH);
+const ti = (x,y)=>y*MW+x;
+const getT = (x,y)=> (x<0||y<0||x>=MW||y>=MH) ? TREE : tiles[ti(x,y)];
+const setT = (x,y,v)=>{ if(x>=0&&y>=0&&x<MW&&y<MH) tiles[ti(x,y)]=v; };
+const rect = (x0,y0,w,h,v)=>{ for(let y=y0;y<y0+h;y++)for(let x=x0;x<x0+w;x++)setT(x,y,v); };
+function hash(x,y){ let h = (x*374761393 + y*668265263) ^ 0x5bf03635; h = (h^(h>>>13))*1274126177; return ((h^(h>>>16))>>>0)/4294967295; }
+
+const LOT_X = [10,26,46,62], LOT_Y = [26,39,52,65], LOT_W = 14, LOT_H = 11, LOTS = 16;
+const lotPos = n => ({x:LOT_X[n%4], y:LOT_Y[Math.floor(n/4)]});
+const lotOrigin = n => { const p=lotPos(n); return {x:p.x+2, y:p.y+2}; };
+
+const MARKET = {x:32,y:12,w:9,h:5, door:{x:36.5,y:17.8}};
+const HANGAR = {x:58,y:12,w:7,h:5, door:{x:61.5,y:17.8}};
+
+(function buildMap(){
+  // Ana yollar
+  rect(2,22,MW-4,2,PATH);           // doğu-batı ana yol
+  rect(42,3,2,MH-5,PATH);           // kuzey-güney ana yol
+  for(const y of [37,50,63,76]) rect(8,y,MW-16,2,PATH);
+  rect(8,24,MW-16,2,PATH);
+  // Meydan
+  rect(38,17,10,5,PLAZA);
+  // Gölet
+  for(let y=5;y<16;y++)for(let x=3;x<15;x++){ const dx=(x-9)/6.2, dy=(y-10.5)/5.6; if(dx*dx+dy*dy<1) setT(x,y,WATER); }
+  // Pazar & hangar binaları
+  rect(MARKET.x,MARKET.y,MARKET.w,MARKET.h,BLD);
+  rect(MARKET.x+2,MARKET.y+MARKET.h,5,1,PLAZA); rect(MARKET.x+3,MARKET.y+MARKET.h+1,3,4,PLAZA);
+  rect(HANGAR.x,HANGAR.y,HANGAR.w,HANGAR.h,BLD);
+  // Pist & taksi yolu
+  rect(52,5,32,3,RUN);
+  rect(60,8,3,4,RUN); rect(58,17,7,2,RUN); rect(65,9,6,9,RUN); rect(44,19,14,2,PATH);
+  // Tarlalar (çitli arsalar)
+  for(let n=0;n<LOTS;n++){
+    const p=lotPos(n);
+    for(let y=p.y;y<p.y+LOT_H;y++)for(let x=p.x;x<p.x+LOT_W;x++){
+      const edge = x===p.x||x===p.x+LOT_W-1||y===p.y||y===p.y+LOT_H-1;
+      setT(x,y, edge?FENCE:LOT);
+    }
+    // giriş kapıları (üst ve alt)
+    setT(p.x+6,p.y,LOT); setT(p.x+7,p.y,LOT); setT(p.x+6,p.y+LOT_H-1,LOT); setT(p.x+7,p.y+LOT_H-1,LOT);
+  }
+  // Ağaçlar & çiçekler
+  for(let y=0;y<MH;y++)for(let x=0;x<MW;x++){
+    if(x<2||y<2||x>=MW-2||y>=MH-2){ if(getT(x,y)===G||getT(x,y)===PATH) setT(x,y,TREE); continue; }
+    if(getT(x,y)!==G) continue;
+    const r=hash(x,y);
+    const nearRoad = [[1,0],[-1,0],[0,1],[0,-1]].some(([a,b])=>{const t=getT(x+a,y+b);return t!==G&&t!==TREE&&t!==FLOWER;});
+    if(!nearRoad && r<(y<22?0.10:0.05)) setT(x,y,TREE);
+    else if(r>0.965) setT(x,y,FLOWER);
+  }
+  // Pazar önünü açık tut
+  rect(30,18,13,4,G); rect(MARKET.x+2,MARKET.y+MARKET.h,5,1,PLAZA); rect(MARKET.x+3,MARKET.y+MARKET.h+1,3,4,PLAZA);
+})();
+
+/* ---------------- Durum ---------------- */
+const S = {
+  online:false, uid:null, me:null, name:'', color:COLORS[0], lot:0,
+  x:43, y:21, dir:0, moving:false, sel:'bugday',
+  others:new Map(),      // uid -> canlı oyuncu (konum)
+  players:{},            // uid -> kayıtlı oyuncu (tarla)
+  timeOffset:0,
+};
+const now = ()=> Date.now()+S.timeOffset;
+let FB = null; // Firebase fonksiyonları
+
+/* ---------------- Yardımcılar ---------------- */
+const $ = id=>document.getElementById(id);
+const fmtMoney = n => n.toLocaleString('tr-TR');
+function fmtTime(ms){ ms=Math.max(0,ms); const s=Math.ceil(ms/1000); if(s<60) return s+' sn'; const m=Math.floor(s/60); if(m<60) return m+' dk '+(s%60? (s%60)+' sn':''); const h=Math.floor(m/60); return h+' sa '+(m%60)+' dk'; }
+let toastT=0; function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),1800); }
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const plotCount = p => p ? p.w*p.h : 0;
+const plantedCount = p => p&&p.plots ? Object.keys(p.plots).length : 0;
+
+/* ---------------- Kayıt ---------------- */
+let saveTimer=0;
+function saveSoon(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(saveNow,400);
+  renderHUD();
+}
+function saveNow(){
+  const data = {...S.me, name:S.name, color:S.color, lot:S.lot, updated:Date.now()};
+  if(S.online){ FB.set(FB.ref(FB.db,'players/'+S.uid), data).catch(e=>toast('Kaydedilemedi: '+e.code)); }
+  else { try{ localStorage.setItem('tk_save', JSON.stringify(data)); }catch(e){} }
+  S.players[S.uid] = data;
+}
+
+/* ---------------- Firebase ---------------- */
+const hasConfig = !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey);
+$('modeInfo').innerHTML = hasConfig ? '🟢 Çevrimiçi mod: herkes aynı köyde.' : '🟡 Test modu: Firebase bağlı değil, tek kişilik.';
+
+async function startOnline(){
+  const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
+  const [app, auth, db] = await Promise.all([import(base+'firebase-app.js'), import(base+'firebase-auth.js'), import(base+'firebase-database.js')]);
+  const fbApp = app.initializeApp(FIREBASE_CONFIG);
+  const a = auth.getAuth(fbApp);
+  const user = await new Promise((res,rej)=>{
+    const off = auth.onAuthStateChanged(a, u=>{ if(u){ off(); res(u); } });
+    auth.signInAnonymously(a).catch(rej);
+  });
+  FB = {...db, db:db.getDatabase(fbApp)};
+  S.uid = user.uid; S.online = true;
+  FB.onValue(FB.ref(FB.db,'.info/serverTimeOffset'), s=>{ S.timeOffset = s.val()||0; });
+
+  // Kayıtlı oyuncu var mı?
+  const snap = await FB.get(FB.ref(FB.db,'players/'+S.uid));
+  if(snap.exists()){ const d=snap.val(); S.me = {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}}; S.lot = d.lot; }
+  else {
+    S.lot = await claimLot();
+    if(S.lot<0) throw new Error('Köy dolu! Şu an boş arsa yok.');
+    S.me = START();
+  }
+  saveNow();
+
+  // Tüm oyuncuların tarlaları
+  FB.onValue(FB.ref(FB.db,'players'), s=>{
+    const all = s.val()||{};
+    for(const id in all){ if(id!==S.uid) S.players[id]=all[id]; }
+    for(const id in S.players){ if(id!==S.uid && !all[id]) delete S.players[id]; }
+    if($('panel').dataset.kind==='board') openBoard();
+  });
+
+  // Canlı konumlar
+  const pres = FB.ref(FB.db,'presence');
+  const upd = s=>{
+    if(s.key===S.uid) return;
+    const v=s.val(); if(!v) return;
+    let o=S.others.get(s.key);
+    if(!o){ o={x:v.x,y:v.y,msgShown:0}; S.others.set(s.key,o); if(v.mt && Date.now()-v.mt>8000) o.msgShown=v.mt; }
+    o.tx=v.x; o.ty=v.y; o.name=v.n; o.color=v.c; o.dir=v.d; o.moving=!!v.m; o.t=v.t;
+    if(v.mt && v.mt!==o.msgShown){ o.msg=v.msg; o.msgShown=v.mt; o.msgLocal=performance.now(); addChatLog(v.n, v.msg); }
+  };
+  FB.onChildAdded(pres, upd);
+  FB.onChildChanged(pres, upd);
+  FB.onChildRemoved(pres, s=>S.others.delete(s.key));
+  const myPres = FB.ref(FB.db,'presence/'+S.uid);
+  FB.onDisconnect(myPres).remove();
+  FB.onValue(FB.ref(FB.db,'.info/connected'), s=>{ if(s.val()){ FB.onDisconnect(myPres).remove(); sendPresence(true); } });
+}
+
+async function claimLot(){
+  for(let n=0;n<LOTS;n++){
+    const r = await FB.runTransaction(FB.ref(FB.db,'lots/'+n), cur => (cur===null||cur===S.uid) ? S.uid : undefined);
+    if(r.committed && r.snapshot.val()===S.uid) return n;
+  }
+  return -1;
+}
+
+let lastPres=0, lastSent='', myMsg='', myMsgT=0;
+function sendPresence(force){
+  if(!S.online) return;
+  const t=performance.now();
+  if(!force && t-lastPres<150) return;
+  const key = `${S.x.toFixed(2)},${S.y.toFixed(2)},${S.dir},${S.moving}`;
+  if(!force && key===lastSent && t-lastPres<10000) return;
+  lastPres=t; lastSent=key;
+  FB.set(FB.ref(FB.db,'presence/'+S.uid), {n:S.name, c:S.color, x:+S.x.toFixed(2), y:+S.y.toFixed(2), d:S.dir, m:S.moving?1:0, t:FB.serverTimestamp(), msg:myMsg, mt:myMsgT}).catch(()=>{});
+}
+
+/* ---------------- Giriş ekranı ---------------- */
+(function(){
+  const saved = (()=>{ try{ return JSON.parse(localStorage.getItem('tk_profile')||'{}'); }catch(e){ return {}; } })();
+  $('nameIn').value = saved.name||'';
+  S.color = saved.color||COLORS[Math.floor(Math.random()*COLORS.length)];
+  const sw=$('swatches');
+  COLORS.forEach(c=>{ const d=document.createElement('div'); d.className='sw'+(c===S.color?' on':''); d.style.background=c; d.onclick=()=>{ S.color=c; [...sw.children].forEach(e=>e.classList.toggle('on',e===d)); }; sw.appendChild(d); });
+  $('play').onclick = async ()=>{
+    const name = $('nameIn').value.trim().replace(/\s+/g,' ');
+    if(name.length<2){ toast('Adın en az 2 harf olsun'); return; }
+    S.name=name;
+    try{ localStorage.setItem('tk_profile', JSON.stringify({name, color:S.color})); }catch(e){}
+    $('play').disabled=true; $('play').textContent='Bağlanıyor…';
+    try{
+      if(hasConfig) await startOnline();
+      else {
+        S.uid='local';
+        let d=null; try{ d=JSON.parse(localStorage.getItem('tk_save')||'null'); }catch(e){}
+        S.me = d ? {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}} : START();
+        S.lot = 0; saveNow();
+      }
+      const o=lotOrigin(S.lot); S.x=o.x+4.5; S.y=o.y-1.3;
+      $('login').classList.remove('on');
+      renderHUD(); loop.started || requestAnimationFrame(loop);
+      toast(S.online?'Köye hoş geldin, '+S.name+'!':'Test modu: tek kişilik');
+    }catch(e){
+      console.error(e);
+      $('play').disabled=false; $('play').textContent='Tekrar dene';
+      toast('Bağlantı hatası: '+(e.message||e.code||e));
+    }
+  };
+  $('nameIn').addEventListener('keydown',e=>{ if(e.key==='Enter') $('play').click(); });
+})();
+
+/* ---------------- HUD ---------------- */
+function unlocked(id){ return plotCount(S.me) >= CROPS[id].kilit; }
+function renderHUD(){
+  if(!S.me) return;
+  $('money').textContent = '💰 '+fmtMoney(S.me.money);
+  $('size').innerHTML = '🟫 '+plotCount(S.me)+'<span class="wide"> parsel</span>';
+  const hb=$('hotbar'); hb.innerHTML='';
+  for(const id of CROP_IDS){
+    if(!unlocked(id) && !(S.me.seeds[id]>0)) continue;
+    const n=S.me.seeds[id]||0;
+    const d=document.createElement('div');
+    d.className='slot'+(S.sel===id?' sel':'')+(n?'':' empty');
+    d.innerHTML=`${CROPS[id].em}<small>${n}</small>`;
+    d.title=CROPS[id].ad+' tohumu';
+    d.onclick=()=>{ S.sel=id; renderHUD(); toast(CROPS[id].ad+' seçildi'); };
+    hb.appendChild(d);
+  }
+  const b=document.createElement('div'); b.className='slot'; b.innerHTML='🧺<small>'+Object.values(S.me.crops).reduce((a,b)=>a+b,0)+'</small>'; b.title='Sepet (ürünler)';
+  b.onclick=()=>toast(sepetText()); hb.appendChild(b);
+}
+function sepetText(){ const parts=CROP_IDS.filter(i=>S.me.crops[i]>0).map(i=>CROPS[i].em+' '+S.me.crops[i]); return parts.length?'Sepet: '+parts.join('  ')+' — Pazar\'da sat':'Sepetin boş'; }
+
+/* ---------------- Tarla mantığı ---------------- */
+function plotFromTile(tx,ty){
+  for(let n=0;n<LOTS;n++){
+    const o=lotOrigin(n);
+    const px=tx-o.x, py=ty-o.y;
+    if(px>=0&&py>=0&&px<MAX_W&&py<MAX_H) return {n,px,py};
+  }
+  return null;
+}
+function ownerOfLot(n){ for(const id in S.players){ if(S.players[id] && S.players[id].lot===n) return id; } return null; }
+function cropStage(pl){ const c=CROPS[pl.c]; if(!c) return 0; const p=(now()-pl.t)/c.sure; return p>=1?3:(p>0.5?2:(p>0.15?1:0)); }
+
+function actPlot(px,py){
+  const me=S.me;
+  if(px>=me.w||py>=me.h){ toast('Bu kısım henüz senin değil — Pazar\'dan arazi al'); return; }
+  const k=px+'_'+py, pl=me.plots[k];
+  if(!pl){
+    const id=S.sel;
+    if(!unlocked(id)){ toast(CROPS[id].ad+' için '+CROPS[id].kilit+' parsel lazım'); return; }
+    if(!(me.seeds[id]>0)){ toast(CROPS[id].ad+' tohumun yok — Pazar\'dan al'); return; }
+    me.seeds[id]--; me.plots[k]={c:id,t:now()};
+    puff(px,py,'#8b5a2b'); saveSoon(); return;
+  }
+  const c=CROPS[pl.c], left=pl.t+c.sure-now();
+  if(left>0){ toast(c.em+' '+c.ad+': '+fmtTime(left)+' kaldı'); return; }
+  delete me.plots[k];
+  me.crops[pl.c]=(me.crops[pl.c]||0)+1;
+  puff(px,py,c.renk); floatText(px,py,'+1 '+c.em); saveSoon();
+}
+
+/* ---------------- Paneller ---------------- */
+const panel=$('panel');
+function openPanel(kind,title,html){ panel.dataset.kind=kind; $('pTitle').textContent=title; $('pBody').innerHTML=html; panel.classList.add('on'); }
+function closePanel(){ panel.classList.remove('on'); panel.dataset.kind=''; }
+$('pClose').onclick=closePanel;
+panel.addEventListener('pointerdown',e=>{ if(e.target===panel) closePanel(); });
+
+let shopTab='sat';
+function openShop(tab){
+  if(tab) shopTab=tab;
+  const me=S.me;
+  let h=`<div class="tabs"><button class="btn tab ${shopTab==='sat'?'on':''}" data-tab="sat">Sat</button><button class="btn tab ${shopTab==='tohum'?'on':''}" data-tab="tohum">Tohum</button><button class="btn tab ${shopTab==='arazi'?'on':''}" data-tab="arazi">Arazi</button></div>`;
+  h+=`<p class="muted" style="margin:0 0 6px">Paran: <b>💰 ${fmtMoney(me.money)}</b></p>`;
+  if(shopTab==='sat'){
+    let any=false;
+    for(const id of CROP_IDS){ const n=me.crops[id]||0; if(!n) continue; any=true; const c=CROPS[id];
+      h+=`<div class="row"><span class="em">${c.em}</span><div class="grow"><b>${c.ad}</b> ×${n}<div class="muted">tanesi 💰${c.fiyat}</div></div><button class="btn" data-sell="${id}">Sat (${fmtMoney(n*c.fiyat)})</button></div>`; }
+    if(!any) h+='<p>Sepetin boş. Tarlana ekip hasat et, sonra burada sat.</p>';
+    else h+=`<button class="btn primary" style="width:100%;margin-top:8px" data-sell="*">Hepsini sat</button>`;
+  } else if(shopTab==='tohum'){
+    for(const id of CROP_IDS){ const c=CROPS[id]; const ok=unlocked(id);
+      h+=`<div class="row"><span class="em">${c.em}</span><div class="grow"><b>${c.ad}</b> <span class="muted">(${me.seeds[id]||0} adet)</span><div class="muted">${ok?`Büyüme ${fmtTime(c.sure)} · satış 💰${c.fiyat}`:`🔒 ${c.kilit} parsel tarla gerekir`}</div></div>
+      ${ok?`<button class="btn" data-buy="${id}" data-n="1">💰${c.tohum}</button><button class="btn" data-buy="${id}" data-n="5">×5</button>`:''}</div>`; }
+  } else {
+    const cnt=plotCount(me);
+    h+=`<p>Tarlan: <b>${me.w}×${me.h} = ${cnt} parsel</b> (en çok ${MAX_W}×${MAX_H})</p>`;
+    if(me.w>=MAX_W && me.h>=MAX_H) h+='<p>Tarlan en büyük boyutta! 🎉</p>';
+    else {
+      const ns=nextSize(me);
+      if(ns.w>MONEY_MAX_W || ns.h>MONEY_MAX_H){
+        h+=`<div class="row"><span class="em">🔒</span><div class="grow"><b>${ns.w}×${ns.h}</b> için şehirden malzeme gerekiyor<div class="muted">Sulama borusu ve çit teli başka şehirlerde satılıyor. Uçaklar gelince açılacak ✈️</div></div></div>`;
+      } else {
+        const cost=expandCost(me);
+        h+=`<div class="row"><span class="em">🚜</span><div class="grow"><b>Genişlet → ${ns.w}×${ns.h}</b><div class="muted">+${ns.w*ns.h-cnt} parsel</div></div><button class="btn primary" data-expand>💰${fmtMoney(cost)}</button></div>`;
+      }
+    }
+    h+=`<p class="muted">Kilitli ürünler: ${CROP_IDS.filter(i=>!unlocked(i)).map(i=>CROPS[i].em+' '+CROPS[i].kilit+' parsel').join(' · ')||'hepsi açık'}</p>`;
+  }
+  openPanel('shop','🛒 Köy Pazarı',h);
+}
+$('pBody').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  const me=S.me;
+  if(b.dataset.tab){ openShop(b.dataset.tab); return; }
+  if(b.dataset.sell){
+    const ids = b.dataset.sell==='*'?CROP_IDS:[b.dataset.sell]; let gain=0;
+    for(const id of ids){ const n=me.crops[id]||0; gain+=n*CROPS[id].fiyat; me.crops[id]=0; }
+    me.money+=gain; if(gain) toast('+💰'+fmtMoney(gain)); saveSoon(); openShop(); return;
+  }
+  if(b.dataset.buy){
+    const id=b.dataset.buy, n=+b.dataset.n, cost=CROPS[id].tohum*n;
+    if(me.money<cost){ toast('Paran yetmiyor'); return; }
+    me.money-=cost; me.seeds[id]=(me.seeds[id]||0)+n; S.sel=id; saveSoon(); openShop(); return;
+  }
+  if(b.dataset.expand!==undefined){
+    const cost=expandCost(me); if(me.money<cost){ toast('Paran yetmiyor'); return; }
+    const ns=nextSize(me); me.money-=cost; me.w=ns.w; me.h=ns.h; toast('Tarlan büyüdü! 🎉 '+me.w+'×'+me.h); saveSoon(); openShop(); return;
+  }
+});
+function openHangar(){
+  openPanel('hangar','✈️ Hangar',`
+    <div class="row"><span class="em">🛩️</span><div class="grow"><b>Eski Cessna 150</b><div class="muted">Hurda ama uçuyor… çoğu zaman. 2 kişilik, az yük.</div></div><button class="btn" disabled>💰1.500</button></div>
+    <p>Uçaklar bir sonraki güncellemede geliyor: diğer şehirlere 3D uçuş, kargo taşıma, arıza ve bakım.</p>
+    <p class="muted">Şimdilik para biriktir, tarlanı 6×6'ya kadar büyüt.</p>`);
+}
+function openBoard(){
+  const list = Object.entries(S.players).filter(([id,p])=>p&&p.name).map(([id,p])=>({id,p,score:plotCount(p),planted:plantedCount(p)}))
+    .sort((a,b)=>b.score-a.score||b.planted-a.planted||(b.p.money||0)-(a.p.money||0));
+  let h='<p class="muted" style="margin-top:0">Zenginlik = tarla büyüklüğü</p>';
+  list.forEach((e,i)=>{ const on = e.id===S.uid || S.others.has(e.id);
+    h+=`<div class="row"><span class="em">${['🥇','🥈','🥉'][i]||(i+1)}</span><span class="sw" style="width:20px;height:20px;border-width:2px;background:${esc(e.p.color||'#999')}"></span><div class="grow"><b>${esc(e.p.name)}</b>${e.id===S.uid?' (sen)':''} ${on?'<span class="badge" style="background:#2fa86a">çevrimiçi</span>':''}<div class="muted">${e.p.w}×${e.p.h} · ekili ${e.planted}</div></div><b>${e.score} parsel</b></div>`; });
+  openPanel('board','🏆 Zengin Çiftçiler',h);
+}
+
+/* ---------------- Sohbet ---------------- */
+function addChatLog(name,msg){
+  if(!msg) return;
+  const log=$('chatLog'); const d=document.createElement('div');
+  d.innerHTML='<b>'+esc(name)+':</b> '+esc(msg); log.appendChild(d);
+  while(log.children.length>5) log.firstChild.remove();
+  setTimeout(()=>d.remove(),15000);
+}
+$('bChat').onclick=()=>{ const bar=$('chatBar'); bar.classList.toggle('on'); if(bar.classList.contains('on')) $('chatIn').focus(); };
+function sendChat(){
+  const v=$('chatIn').value.trim().slice(0,80); $('chatIn').value=''; $('chatBar').classList.remove('on'); $('chatIn').blur();
+  if(!v) return;
+  myMsg=v; myMsgT=Date.now(); S.myMsgLocal=performance.now(); addChatLog(S.name,v); sendPresence(true);
+}
+$('chatSend').onclick=sendChat;
+$('chatIn').addEventListener('keydown',e=>{ if(e.key==='Enter') sendChat(); if(e.key==='Escape'){ $('chatBar').classList.remove('on'); $('chatIn').blur(); } e.stopPropagation(); });
+$('bBoard').onclick=openBoard;
+$('bHome').onclick=()=>{ const o=lotOrigin(S.lot); S.x=o.x+4.5; S.y=o.y-1.3; toast('Tarlana döndün 🏠'); sendPresence(true); };
+
+/* ---------------- Girdi ---------------- */
+const keys={};
+addEventListener('keydown',e=>{
+  if(document.activeElement && document.activeElement.tagName==='INPUT') return;
+  keys[e.key.toLowerCase()]=true;
+  if(e.key==='e'||e.key==='E'||e.key===' '){ e.preventDefault(); doAction(); }
+  if(e.key==='Enter' && S.me){ $('chatBar').classList.add('on'); $('chatIn').focus(); e.preventDefault(); }
+  if(e.key==='Escape') closePanel();
+});
+addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+addEventListener('blur',()=>{ for(const k in keys) keys[k]=false; });
+
+const cv=$('c'), ctx=cv.getContext('2d');
+let VW=0,VH=0,DPR=1,Z=1;
+function resize(){ DPR=Math.min(devicePixelRatio||1,2); VW=innerWidth; VH=innerHeight; cv.width=VW*DPR; cv.height=VH*DPR; Z=Math.max(0.85,Math.min(1.6,Math.min(VW,VH)/520)); }
+addEventListener('resize',resize); resize();
+
+const joy={id:null,ox:0,oy:0,dx:0,dy:0};
+const taps=new Map();
+cv.addEventListener('pointerdown',e=>{
+  if(!S.me) return;
+  cv.setPointerCapture(e.pointerId);
+  if(e.pointerType!=='mouse' && e.clientX<VW*0.45 && joy.id===null){ joy.id=e.pointerId; joy.ox=e.clientX; joy.oy=e.clientY; joy.dx=joy.dy=0; return; }
+  taps.set(e.pointerId,{x:e.clientX,y:e.clientY,t:performance.now()});
+});
+cv.addEventListener('pointermove',e=>{
+  if(e.pointerId===joy.id){ let dx=e.clientX-joy.ox, dy=e.clientY-joy.oy; const L=Math.hypot(dx,dy), R=55; if(L>R){ dx*=R/L; dy*=R/L; } joy.dx=dx/R; joy.dy=dy/R; }
+});
+const endPtr=e=>{
+  if(e.pointerId===joy.id){ joy.id=null; joy.dx=joy.dy=0; return; }
+  const t=taps.get(e.pointerId); taps.delete(e.pointerId);
+  if(t && e.type==='pointerup' && Math.hypot(e.clientX-t.x,e.clientY-t.y)<12 && performance.now()-t.t<500) worldTap(e.clientX,e.clientY);
+};
+cv.addEventListener('pointerup',endPtr); cv.addEventListener('pointercancel',endPtr);
+
+let camX=0,camY=0;
+function worldTap(sx,sy){
+  const wx=(sx/Z+camX)/T, wy=(sy/Z+camY)/T;
+  const tx=Math.floor(wx), ty=Math.floor(wy);
+  const near = (x,y,r)=>Math.hypot(S.x-x,S.y-y)<=r;
+  const pp=plotFromTile(tx,ty);
+  if(pp){
+    if(pp.n!==S.lot){ const id=ownerOfLot(pp.n); toast(id&&S.players[id]?S.players[id].name+'\'in tarlası':'Boş arsa'); return; }
+    if(!near(tx+.5,ty+.5,3.2)){ toast('Biraz daha yaklaş'); return; }
+    actPlot(pp.px,pp.py); return;
+  }
+  if(tx>=MARKET.x&&tx<MARKET.x+MARKET.w&&ty>=MARKET.y-1&&ty<MARKET.y+MARKET.h){ near(MARKET.door.x,MARKET.door.y,5)?openShop():toast('Pazar\'a yürü 🛒'); return; }
+  if(tx>=HANGAR.x&&tx<HANGAR.x+HANGAR.w&&ty>=HANGAR.y-1&&ty<HANGAR.y+HANGAR.h){ near(HANGAR.door.x,HANGAR.door.y,5)?openHangar():toast('Hangar\'a yürü ✈️'); return; }
+}
+
+/* ---------------- Etkileşim düğmesi ---------------- */
+let curAction=null;
+function computeAction(){
+  if(!S.me) return null;
+  const pp=plotFromTile(Math.floor(S.x),Math.floor(S.y));
+  if(pp && pp.n===S.lot){
+    const me=S.me;
+    if(pp.px>=me.w||pp.py>=me.h) return {label:'🔒 Kapalı',fn:()=>actPlot(pp.px,pp.py)};
+    const pl=me.plots[pp.px+'_'+pp.py];
+    if(!pl) return {label:'Ek '+CROPS[S.sel].em+' '+(me.seeds[S.sel]||0),fn:()=>actPlot(pp.px,pp.py)};
+    const left=pl.t+CROPS[pl.c].sure-now();
+    if(left<=0) return {label:'Hasat '+CROPS[pl.c].em,fn:()=>actPlot(pp.px,pp.py)};
+    return {label:'⏳ '+fmtTime(left),fn:()=>actPlot(pp.px,pp.py)};
+  }
+  if(Math.hypot(S.x-MARKET.door.x,S.y-MARKET.door.y)<2.6) return {label:'🛒 Pazar',fn:()=>openShop()};
+  if(Math.hypot(S.x-HANGAR.door.x,S.y-HANGAR.door.y)<2.6) return {label:'✈️ Hangar',fn:openHangar};
+  return null;
+}
+function doAction(){ if(panel.classList.contains('on')) return; const a=computeAction(); if(a) a.fn(); }
+$('action').onclick=doAction;
+let lastLabel=null;
+function updateActionBtn(){
+  curAction=computeAction(); const l=curAction?curAction.label:null;
+  if(l!==lastLabel){ lastLabel=l; const b=$('action'); if(l){ b.textContent=l; b.style.display='block'; } else b.style.display='none'; }
+}
+
+/* ---------------- Efektler ---------------- */
+const fx=[];
+function plotWorld(px,py){ const o=lotOrigin(S.lot); return {x:(o.x+px+.5)*T, y:(o.y+py+.5)*T}; }
+function puff(px,py,col){ const p=plotWorld(px,py); for(let i=0;i<10;i++) fx.push({x:p.x,y:p.y,vx:(Math.random()-.5)*60,vy:-Math.random()*60-10,life:.6,max:.6,col,r:2+Math.random()*3}); }
+function floatText(px,py,txt){ const p=plotWorld(px,py); fx.push({x:p.x,y:p.y-10,vx:0,vy:-30,life:1.1,max:1.1,txt}); }
+
+/* ---------------- Hareket ---------------- */
+function blocked(x,y){ const r=0.28; for(const [ax,ay] of [[-r,-0.1],[r,-0.1],[-r,0.3],[r,0.3]]){ if(SOLID.has(getT(Math.floor(x+ax),Math.floor(y+ay)))) return true; } return false; }
+function update(dt){
+  let ix=0,iy=0;
+  if(keys['a']||keys['arrowleft']) ix--; if(keys['d']||keys['arrowright']) ix++;
+  if(keys['w']||keys['arrowup']) iy--; if(keys['s']||keys['arrowdown']) iy++;
+  if(joy.id!==null){ ix+=joy.dx; iy+=joy.dy; }
+  const L=Math.hypot(ix,iy);
+  if(L>0.15 && !panel.classList.contains('on')){
+    if(L>1){ ix/=L; iy/=L; }
+    const sp=5.2*dt;
+    const nx=S.x+ix*sp, ny=S.y+iy*sp;
+    if(!blocked(nx,S.y)) S.x=nx;
+    if(!blocked(S.x,ny)) S.y=ny;
+    S.dir = Math.abs(ix)>Math.abs(iy) ? (ix>0?1:3) : (iy>0?0:2);
+    S.moving=true;
+  } else S.moving=false;
+  sendPresence(false);
+  // diğer oyuncuları yumuşat
+  const k=1-Math.pow(0.0005,dt);
+  for(const [id,o] of S.others){ o.x+=(o.tx-o.x)*k; o.y+=(o.ty-o.y)*k; if(Math.hypot(o.tx-o.x,o.ty-o.y)>6){o.x=o.tx;o.y=o.ty;} }
+  for(let i=fx.length-1;i>=0;i--){ const f=fx[i]; f.life-=dt; f.x+=f.vx*dt; f.y+=f.vy*dt; if(!f.txt) f.vy+=160*dt; if(f.life<=0) fx.splice(i,1); }
+}
+
+/* ---------------- Çizim ---------------- */
+const COL = {grass:'#6cbf4f', grass2:'#62b246', grass3:'#79c95a', path:'#d8b77a', path2:'#c9a466', water:'#4aa6e0', water2:'#7cc4ee', run:'#5a5f66', plaza:'#d9cbb0', lot:'#74b552', soil:'#8a5a32', soil2:'#76492a', fence:'#8a5a2b'};
+function drawTile(t,x,y,time){
+  const sx=x*T, sy=y*T, h=hash(x,y);
+  switch(t){
+    case G: case TREE: case FLOWER:
+      ctx.fillStyle = h<0.33?COL.grass:(h<0.66?COL.grass2:COL.grass3); ctx.fillRect(sx,sy,T,T);
+      if(h>0.7){ ctx.fillStyle='#5aa640'; ctx.fillRect(sx+h*20|0,sy+(1-h)*22|0,2,5); ctx.fillRect(sx+(h*20|0)+3,sy+((1-h)*22|0)+1,2,4); }
+      if(t===FLOWER){ const fc=['#fff','#ffd84a','#ff7aa8','#b48cff'][Math.floor(h*400)%4]; for(let i=0;i<3;i++){ const fx_=sx+6+((h*97*(i+1))%20), fy=sy+6+((h*53*(i+2))%20); ctx.fillStyle=fc; ctx.fillRect(fx_,fy,4,4); ctx.fillStyle='#f6c431'; ctx.fillRect(fx_+1,fy+1,2,2);} }
+      break;
+    case PATH:
+      ctx.fillStyle=COL.path; ctx.fillRect(sx,sy,T,T);
+      ctx.fillStyle=COL.path2; if(h>0.5) ctx.fillRect(sx+(h*24|0),sy+((h*7)%1*24|0),4,3); if(h<0.3) ctx.fillRect(sx+6,sy+20,3,3);
+      break;
+    case PLAZA:
+      ctx.fillStyle=COL.plaza; ctx.fillRect(sx,sy,T,T); ctx.strokeStyle='#c4b495'; ctx.lineWidth=1; ctx.strokeRect(sx+.5,sy+.5,T/2,T/2); ctx.strokeRect(sx+T/2+.5,sy+T/2+.5,T/2-1,T/2-1);
+      break;
+    case WATER: {
+      ctx.fillStyle=COL.water; ctx.fillRect(sx,sy,T,T);
+      const w=Math.sin(time*2+x*0.9+y*1.3);
+      ctx.fillStyle=COL.water2; ctx.fillRect(sx+6+w*3,sy+10,10,2); ctx.fillRect(sx+16-w*3,sy+22,8,2);
+      // kıyı
+      ctx.fillStyle='#e3cf91';
+      if(getT(x,y-1)!==WATER) ctx.fillRect(sx,sy,T,4); if(getT(x,y+1)!==WATER) ctx.fillRect(sx,sy+T-4,T,4);
+      if(getT(x-1,y)!==WATER) ctx.fillRect(sx,sy,4,T); if(getT(x+1,y)!==WATER) ctx.fillRect(sx+T-4,sy,4,T);
+      break; }
+    case RUN:
+      ctx.fillStyle=COL.run; ctx.fillRect(sx,sy,T,T);
+      if(y===6 && x>=53 && x<83 && x%3===0){ ctx.fillStyle='#f2f2f2'; ctx.fillRect(sx+4,sy+14,22,4); }
+      if((x===52||x===83) && y>=5 && y<=7){ ctx.fillStyle='#f2f2f2'; for(let i=0;i<4;i++) ctx.fillRect(sx+4+i*7,sy+4,4,24); }
+      break;
+    case LOT: case FENCE:
+      ctx.fillStyle=COL.lot; ctx.fillRect(sx,sy,T,T);
+      if(h>0.8){ ctx.fillStyle='#68a948'; ctx.fillRect(sx+10,sy+12,3,4); }
+      if(t===FENCE){
+        ctx.fillStyle=COL.fence;
+        const hz = getT(x-1,y)===FENCE||getT(x+1,y)===FENCE;
+        const vt = getT(x,y-1)===FENCE||getT(x,y+1)===FENCE;
+        if(hz){ ctx.fillRect(sx,sy+12,T,4); ctx.fillRect(sx,sy+20,T,4); }
+        if(vt){ ctx.fillRect(sx+12,sy,4,T); ctx.fillRect(sx+20,sy,4,T); }
+        ctx.fillStyle='#6e4520'; ctx.fillRect(sx+12,sy+8,8,18);
+      }
+      break;
+    case BLD:
+      ctx.fillStyle=COL.grass2; ctx.fillRect(sx,sy,T,T);
+      break;
+  }
+}
+function drawTree(x,y,time){
+  const sx=x*T+T/2, sy=y*T+T/2, h=hash(x,y), sway=Math.sin(time*1.5+h*10)*1.2;
+  ctx.fillStyle='rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(sx,sy+12,14,5,0,0,7); ctx.fill();
+  ctx.fillStyle='#7a4e2a'; ctx.fillRect(sx-3,sy,6,13);
+  const g = h<0.5?['#2f8a3a','#3fa34a','#56b95c']:['#2b7d47','#389a55','#4fb26a'];
+  ctx.fillStyle=g[0]; ctx.beginPath(); ctx.arc(sx+sway,sy-6,15,0,7); ctx.fill();
+  ctx.fillStyle=g[1]; ctx.beginPath(); ctx.arc(sx-4+sway,sy-10,11,0,7); ctx.fill();
+  ctx.fillStyle=g[2]; ctx.beginPath(); ctx.arc(sx-6+sway,sy-13,5,0,7); ctx.fill();
+  if(h>0.85){ ctx.fillStyle='#e8413b'; ctx.fillRect(sx+4+sway,sy-6,4,4); ctx.fillRect(sx-8+sway,sy-2,4,4); }
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function label(txt,x,y,size,fill='#fff'){ ctx.font=`bold ${size}px Trebuchet MS, sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.lineWidth=3.5; ctx.strokeStyle='rgba(40,25,10,.9)'; ctx.strokeText(txt,x,y); ctx.fillStyle=fill; ctx.fillText(txt,x,y); }
+function drawMarket(){
+  const x=MARKET.x*T, y=MARKET.y*T, w=MARKET.w*T, h=MARKET.h*T;
+  ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(x+6,y+10,w,h);
+  ctx.fillStyle='#f3e2bf'; ctx.fillRect(x,y+T*1.4,w,h-T*1.4);
+  ctx.fillStyle='#c9a875'; for(let i=0;i<w;i+=16) ctx.fillRect(x+i,y+T*1.4,2,h-T*1.4);
+  // tente
+  for(let i=0;i<MARKET.w*2;i++){ ctx.fillStyle=i%2?'#fff4e0':'#e2504c'; ctx.fillRect(x+i*T/2,y,T/2,T*1.6); }
+  ctx.fillStyle='rgba(0,0,0,.15)'; ctx.fillRect(x,y+T*1.45,w,5);
+  for(let i=0;i<MARKET.w*2;i++){ ctx.fillStyle=i%2?'#fff4e0':'#e2504c'; ctx.beginPath(); ctx.arc(x+i*T/2+T/4,y+T*1.6,T/4,0,Math.PI); ctx.fill(); }
+  // tezgah & sandıklar
+  ctx.fillStyle='#8a5a2b'; ctx.fillRect(x+T*0.5,y+h-T*1.4,w-T,T*0.6);
+  const goods=['#e8c547','#f08a24','#e0412f','#f5d33a','#e83a5a','#6cbf4f'];
+  goods.forEach((g,i)=>{ const gx=x+T*0.8+i*T*1.25, gy=y+h-T*1.9; ctx.fillStyle='#a0703c'; ctx.fillRect(gx,gy,T*0.9,T*0.55); ctx.fillStyle=g; for(let k=0;k<4;k++){ ctx.beginPath(); ctx.arc(gx+6+k*6,gy+4,4,0,7); ctx.fill(); } });
+  ctx.fillStyle='#6e4520'; ctx.fillRect(x+w/2-T*0.6,y+h-T*0.8,T*1.2,T*0.8);
+  rr(x+w/2-T*1.6,y+T*0.25,T*3.2,T*0.85,8); ctx.fillStyle='#fff8ec'; ctx.fill(); ctx.strokeStyle='#3b2a1a'; ctx.lineWidth=3; ctx.stroke();
+  label('PAZAR',x+w/2,y+T*0.68,17,'#e2504c');
+}
+function drawHangar(time){
+  const x=HANGAR.x*T, y=HANGAR.y*T, w=HANGAR.w*T, h=HANGAR.h*T;
+  ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(x+6,y+10,w,h);
+  ctx.fillStyle='#9aa4ad'; ctx.fillRect(x,y,w,h);
+  ctx.fillStyle='#b9c2ca'; for(let i=0;i<w;i+=12) ctx.fillRect(x+i,y,6,h*0.55);
+  ctx.fillStyle='#5f6870'; ctx.fillRect(x+T,y+h*0.55,w-2*T,h*0.45);
+  ctx.fillStyle='#4b535a'; for(let i=x+T;i<x+w-T;i+=10) ctx.fillRect(i,y+h*0.55,2,h*0.45);
+  rr(x+w/2-T*1.8,y+T*0.4,T*3.6,T*0.9,8); ctx.fillStyle='#fff8ec'; ctx.fill(); ctx.strokeStyle='#3b2a1a'; ctx.lineWidth=3; ctx.stroke();
+  label('HANGAR',x+w/2,y+T*0.85,16,'#3d7fe0');
+  // rüzgar tulumu
+  const wx=(HANGAR.x+HANGAR.w+0.6)*T, wy=(HANGAR.y-0.5)*T;
+  ctx.fillStyle='#ddd'; ctx.fillRect(wx,wy,3,T*1.4);
+  const fl=Math.sin(time*3)*3;
+  for(let i=0;i<4;i++){ ctx.fillStyle=i%2?'#fff':'#f07a26'; ctx.fillRect(wx+3+i*7,wy+2+fl*i/4,7,8-i); }
+}
+function drawPlane(cx,cy,scale,body,time){
+  ctx.save(); ctx.translate(cx,cy); ctx.scale(scale,scale);
+  ctx.fillStyle='rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(6,10,44,10,0,0,7); ctx.fill();
+  ctx.fillStyle=body; // gövde (burun sağda)
+  rr(-34,-6,66,12,6); ctx.fill();
+  ctx.fillStyle='#d9d2c3'; rr(-8,-40,18,80,5); ctx.fill(); // kanat
+  ctx.fillStyle='#b3aa98'; ctx.fillRect(-8,-40,4,80);
+  ctx.fillStyle=body; rr(-36,-16,10,32,3); ctx.fill(); // kuyruk
+  ctx.fillStyle='#7fb8d9'; ctx.fillRect(8,-4,8,8);
+  ctx.fillStyle='#8b6f4a'; ctx.fillRect(20,-3,8,2); ctx.fillRect(-20,2,6,2); // pas lekeleri
+  ctx.fillStyle='#444'; ctx.fillRect(32,-1,3,2);
+  ctx.fillStyle='rgba(60,60,60,.8)'; const a=time*0; ctx.fillRect(34,-14,2,28); // pervane
+  ctx.restore();
+}
+function drawCropAt(c,stage,sx,sy,time,ripe){
+  const cr=CROPS[c]; if(!cr) return;
+  const cx=sx+T/2, cy=sy+T/2;
+  if(stage===0){ ctx.fillStyle='#5d3a1d'; ctx.fillRect(cx-6,cy-1,3,3); ctx.fillRect(cx+3,cy+2,3,3); ctx.fillRect(cx-1,cy+5,3,3); return; }
+  if(stage===1){ ctx.fillStyle='#5fbf4a'; ctx.fillRect(cx-1,cy-2,2,8); ctx.fillRect(cx-5,cy-3,4,3); ctx.fillRect(cx+1,cy-5,4,3); return; }
+  const big = stage===3;
+  const sw=Math.sin(time*2+sx*0.1)*1;
+  if(c==='bugday'){ ctx.fillStyle=big?'#d9b43a':'#9dcf5a'; for(let i=0;i<4;i++){ const x=cx-9+i*6+sw; ctx.fillRect(x,cy-(big?10:5),2,big?18:12); if(big){ ctx.fillStyle='#f0d26a'; ctx.fillRect(x-1,cy-12,4,7); ctx.fillStyle='#d9b43a'; } } }
+  else if(c==='havuc'){ ctx.fillStyle='#4caf50'; for(let i=0;i<3;i++) ctx.fillRect(cx-6+i*5+sw,cy-(big?10:6),3,big?10:8); if(big){ ctx.fillStyle=cr.renk; ctx.fillRect(cx-5,cy,10,6); } }
+  else if(c==='domates'){ ctx.fillStyle='#3e9a3e'; ctx.fillRect(cx-1,cy-10,2,18); ctx.beginPath(); ctx.arc(cx+sw,cy-3,big?9:7,0,7); ctx.fill(); if(big){ ctx.fillStyle=cr.renk; for(const [a,b] of [[-5,-4],[4,-1],[-2,4]]){ ctx.beginPath(); ctx.arc(cx+a+sw,cy+b,3.5,0,7); ctx.fill(); } } }
+  else if(c==='misir'){ ctx.fillStyle='#3f9a3a'; ctx.fillRect(cx-2+sw,cy-(big?14:8),4,big?22:16); ctx.fillRect(cx-8+sw,cy-4,6,3); ctx.fillRect(cx+2+sw,cy-8,6,3); if(big){ ctx.fillStyle=cr.renk; ctx.fillRect(cx+3+sw,cy-4,4,9); } }
+  else if(c==='cilek'){ ctx.fillStyle='#3e9a3e'; ctx.beginPath(); ctx.arc(cx-4,cy,6,0,7); ctx.arc(cx+4,cy-2,6,0,7); ctx.fill(); if(big){ ctx.fillStyle=cr.renk; for(const [a,b] of [[-5,3],[5,2],[0,-3]]){ ctx.beginPath(); ctx.arc(cx+a,cy+b,3,0,7); ctx.fill(); } } }
+  if(ripe){ const p=(Math.sin(time*5+sx)+1)/2; ctx.fillStyle=`rgba(255,255,255,${0.4+p*0.6})`; ctx.fillRect(sx+T-9,sy+4,3,3); ctx.fillRect(sx+T-10,sy+5,5,1); ctx.fillRect(sx+T-8,sy+3,1,5); }
+}
+function drawLots(time,x0,y0,x1,y1){
+  for(let n=0;n<LOTS;n++){
+    const lp=lotPos(n); if(lp.x>x1||lp.y>y1||lp.x+LOT_W<x0||lp.y+LOT_H<y0) continue;
+    const o=lotOrigin(n), ownerId = n===S.lot ? S.uid : ownerOfLot(n), p = ownerId ? S.players[ownerId] : null;
+    const pdata = n===S.lot ? S.me : p;
+    // sınırlar (kapalı alan)
+    ctx.fillStyle='rgba(60,90,40,.18)'; ctx.fillRect(o.x*T,o.y*T,MAX_W*T,MAX_H*T);
+    ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1;
+    for(let i=0;i<=MAX_W;i++){ ctx.beginPath(); ctx.moveTo((o.x+i)*T,o.y*T); ctx.lineTo((o.x+i)*T,(o.y+MAX_H)*T); ctx.stroke(); }
+    for(let j=0;j<=MAX_H;j++){ ctx.beginPath(); ctx.moveTo(o.x*T,(o.y+j)*T); ctx.lineTo((o.x+MAX_W)*T,(o.y+j)*T); ctx.stroke(); }
+    if(pdata){
+      for(let py=0;py<pdata.h;py++)for(let px=0;px<pdata.w;px++){
+        const sx=(o.x+px)*T, sy=(o.y+py)*T;
+        ctx.fillStyle=COL.soil; ctx.fillRect(sx+1,sy+1,T-2,T-2);
+        ctx.fillStyle=COL.soil2; ctx.fillRect(sx+3,sy+8,T-6,3); ctx.fillRect(sx+3,sy+20,T-6,3);
+        const pl=pdata.plots&&pdata.plots[px+'_'+py];
+        if(pl && CROPS[pl.c]){ const st=cropStage(pl); drawCropAt(pl.c,st,sx,sy,time,st===3 && n===S.lot); }
+      }
+      if(n===S.lot){ ctx.strokeStyle='rgba(255,236,150,.85)'; ctx.lineWidth=2; ctx.setLineDash([6,4]); ctx.strokeRect(o.x*T+1,o.y*T+1,pdata.w*T-2,pdata.h*T-2); ctx.setLineDash([]); }
+    }
+    // tabela
+    const sx=(lp.x+2)*T, sy=(lp.y)*T-6;
+    ctx.fillStyle='#6e4520'; ctx.fillRect(sx+T*0.9,sy+10,4,18);
+    const nm = pdata ? (n===S.lot?S.name:p.name) : 'Boş arsa';
+    ctx.font='bold 13px Trebuchet MS, sans-serif'; const tw=Math.max(60,ctx.measureText(nm).width+28);
+    rr(sx,sy-6,tw,22,5); ctx.fillStyle=pdata?'#f3e2bf':'#ddd'; ctx.fill(); ctx.strokeStyle='#6e4520'; ctx.lineWidth=2.5; ctx.stroke();
+    if(pdata){ ctx.fillStyle=(n===S.lot?S.color:p.color)||'#999'; ctx.beginPath(); ctx.arc(sx+10,sy+5,5,0,7); ctx.fill(); }
+    ctx.fillStyle='#3b2a1a'; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(nm,sx+(pdata?19:8),sy+5.5);
+    if(pdata){ ctx.font='bold 11px Trebuchet MS, sans-serif'; label(plotCount(pdata)+' parsel',sx+tw+30,sy+5,11,'#ffe9a8'); }
+  }
+}
+function drawChar(px,py,color,dir,moving,time,name,isMe,msg,msgAge){
+  const sx=px*T, sy=py*T;
+  const bob = moving ? Math.abs(Math.sin(time*12))*2.5 : 0;
+  const step = moving ? Math.sin(time*12) : 0;
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(sx,sy+10,10,4,0,0,7); ctx.fill();
+  // bacaklar
+  ctx.fillStyle='#3a4a6a'; ctx.fillRect(sx-6,sy+2-bob+step*2,5,8); ctx.fillRect(sx+1,sy+2-bob-step*2,5,8);
+  // gövde
+  rr(sx-9,sy-12-bob,18,16,5); ctx.fillStyle=color; ctx.fill(); ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1.5; ctx.stroke();
+  // askılar (tulum)
+  ctx.fillStyle='rgba(255,255,255,.35)'; ctx.fillRect(sx-6,sy-12-bob,3,8); ctx.fillRect(sx+3,sy-12-bob,3,8);
+  // kafa
+  ctx.fillStyle='#f2c79b'; ctx.beginPath(); ctx.arc(sx,sy-19-bob,8,0,7); ctx.fill();
+  if(dir!==2){ ctx.fillStyle='#3b2a1a'; const ex = dir===1?3:(dir===3?-3:0); ctx.fillRect(sx-4+ex,sy-20-bob,2,3); ctx.fillRect(sx+2+ex,sy-20-bob,2,3); }
+  // hasır şapka
+  ctx.fillStyle='#e0bb62'; ctx.beginPath(); ctx.ellipse(sx,sy-24-bob,12,4,0,0,7); ctx.fill();
+  ctx.fillStyle='#d4a94c'; rr(sx-6,sy-31-bob,12,8,3); ctx.fill();
+  ctx.fillStyle=color; ctx.fillRect(sx-6,sy-26-bob,12,2);
+  // isim
+  label(name, sx, sy-42-bob, 12, isMe?'#ffe27a':'#fff');
+  // konuşma balonu
+  if(msg && msgAge<7){
+    ctx.globalAlpha = msgAge>6 ? 7-msgAge : 1;
+    ctx.font='bold 13px Trebuchet MS, sans-serif';
+    const lines=wrap(msg,150); const w=Math.max(...lines.map(l=>ctx.measureText(l).width))+16, h=lines.length*16+10;
+    const bx=sx-w/2, by=sy-58-bob-h;
+    rr(bx,by,w,h,8); ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#3b2a1a'; ctx.lineWidth=2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx-5,by+h-1); ctx.lineTo(sx,by+h+7); ctx.lineTo(sx+5,by+h-1); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.fillStyle='#3b2a1a'; ctx.textAlign='center'; ctx.textBaseline='top';
+    lines.forEach((l,i)=>ctx.fillText(l,sx,by+6+i*16));
+    ctx.globalAlpha=1;
+  }
+}
+function wrap(text,maxW){ const words=text.split(' '); const lines=[]; let cur=''; for(const w of words){ const t=cur?cur+' '+w:w; if(ctx.measureText(t).width>maxW && cur){ lines.push(cur); cur=w; } else cur=t; } if(cur) lines.push(cur); return lines.slice(0,3); }
+
+function render(time){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const vw=VW/Z, vh=VH/Z;
+  camX = Math.max(0,Math.min(MW*T-vw, S.x*T - vw/2));
+  camY = Math.max(0,Math.min(MH*T-vh, S.y*T - vh/2));
+  ctx.setTransform(DPR*Z,0,0,DPR*Z,-camX*DPR*Z,-camY*DPR*Z);
+  const x0=Math.max(0,Math.floor(camX/T)), y0=Math.max(0,Math.floor(camY/T));
+  const x1=Math.min(MW-1,Math.ceil((camX+vw)/T)), y1=Math.min(MH-1,Math.ceil((camY+vh)/T));
+  for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) drawTile(tiles[ti(x,y)],x,y,time);
+  drawLots(time,x0,y0,x1,y1);
+  drawMarket(); drawHangar(time);
+  drawPlane((67.5)*T,(13.5)*T,0.9,'#e8e2d0',time);
+  // y-sıralı nesneler: ağaçlar + oyuncular
+  const ents=[];
+  for(let y=Math.max(0,y0-1);y<=Math.min(MH-1,y1+1);y++) for(let x=x0;x<=x1;x++) if(tiles[ti(x,y)]===TREE) ents.push({y:y+0.5,f:()=>drawTree(x,y,time)});
+  const pnow=performance.now();
+  for(const [id,o] of S.others){
+    if(o.t && now()-o.t>90000) continue;
+    ents.push({y:o.y,f:()=>drawChar(o.x,o.y,o.color||'#999',o.dir||0,o.moving,time,o.name||'?',false,o.msg,o.msgLocal?(pnow-o.msgLocal)/1000:99)});
+  }
+  ents.push({y:S.y,f:()=>drawChar(S.x,S.y,S.color,S.dir,S.moving,time,S.name,true,myMsg,S.myMsgLocal?(pnow-S.myMsgLocal)/1000:99)});
+  ents.sort((a,b)=>a.y-b.y); for(const e of ents) e.f();
+  // efektler
+  for(const f of fx){ const a=Math.max(0,f.life/f.max); ctx.globalAlpha=a; if(f.txt) label(f.txt,f.x,f.y,14,'#fff6c2'); else { ctx.fillStyle=f.col; ctx.fillRect(f.x-f.r/2,f.y-f.r/2,f.r,f.r); } } ctx.globalAlpha=1;
+  // joystick
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  if(joy.id!==null){
+    ctx.fillStyle='rgba(255,248,236,.25)'; ctx.strokeStyle='rgba(59,42,26,.6)'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(joy.ox,joy.oy,55,0,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='rgba(255,248,236,.85)'; ctx.beginPath(); ctx.arc(joy.ox+joy.dx*55,joy.oy+joy.dy*55,24,0,7); ctx.fill(); ctx.stroke();
+  } else if(matchMedia('(pointer:coarse)').matches){
+    ctx.fillStyle='rgba(255,248,236,.12)'; ctx.strokeStyle='rgba(255,248,236,.35)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(80,VH-150,45,0,7); ctx.fill(); ctx.stroke();
+  }
+}
+
+/* ---------------- Döngü ---------------- */
+let lastT=performance.now(), hudT=0;
+function loop(t){
+  loop.started=true;
+  const dt=Math.min(0.05,(t-lastT)/1000); lastT=t;
+  if(S.me){ update(dt); render(t/1000); }
+  hudT+=dt;
+  if(hudT>0.15){ hudT=0; updateActionBtn(); let c=1; for(const o of S.others.values()) if(!o.t||now()-o.t<90000) c++; $('online').textContent='👥 '+c; }
+  requestAnimationFrame(loop);
+}
+// Test için dışarıya açık
+window.__game = {S, CROPS, actPlot, openShop, lotOrigin};
+</script>
+</body>
+</html>
