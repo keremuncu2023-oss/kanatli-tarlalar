@@ -38,7 +38,7 @@
   .tabs{display:flex;gap:6px;margin-bottom:8px}
   .tab{flex:1;height:40px;font-size:15px}
   .tab.on{background:var(--accent);color:#fff}
-  input[type=text]{width:100%;font-size:18px;padding:10px 12px;border:3px solid var(--ink);border-radius:12px;font-family:inherit;background:#fff}
+  input[type=text],input[type=password]{display:block;width:100%;font-size:18px;padding:10px 12px;border:3px solid var(--ink);border-radius:12px;font-family:inherit;background:#fff}
   .swatches{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   .sw{width:36px;height:36px;border-radius:50%;border:3px solid var(--ink);cursor:pointer}
   .sw.on{outline:4px solid var(--accent);outline-offset:2px}
@@ -80,10 +80,26 @@
 <div class="modal on" id="login"><div class="card">
   <p class="title">🌾 Kanatlı Tarlalar ✈️</p>
   <p class="muted" style="text-align:center;margin-top:0">Tarlanı büyüt, uçağını al, en zengin çiftçi ol.</p>
-  <label><b>Adın</b></label>
-  <input type="text" id="nameIn" maxlength="14" placeholder="Örn. Kerem">
-  <div class="swatches" id="swatches"></div>
-  <button class="btn primary" id="play" style="width:100%;height:54px;font-size:20px">Oyna</button>
+  <div id="loading" style="text-align:center;padding:16px 0;font-weight:700">Bağlanıyor…</div>
+  <!-- Giriş / Hesap aç -->
+  <div id="authBox" style="display:none">
+    <div class="tabs" id="authTabs"><button class="btn tab on" data-m="login">Giriş yap</button><button class="btn tab" data-m="signup">Hesap aç</button></div>
+    <label><b>Kullanıcı adı</b></label>
+    <input type="text" id="nameIn" maxlength="14" placeholder="Örn. Kerem" autocomplete="username" autocapitalize="off" spellcheck="false">
+    <div id="pwWrap" style="margin-top:8px"><label><b>Şifre</b></label>
+    <input type="password" id="pwIn" maxlength="40" placeholder="En az 6 karakter" autocomplete="current-password"></div>
+    <div id="pw2Wrap" style="margin-top:8px;display:none"><label><b>Şifre (tekrar)</b></label>
+    <input type="password" id="pw2In" maxlength="40" autocomplete="new-password"></div>
+    <div id="colorWrap" style="display:none"><div style="margin-top:8px"><b>Karakter rengin</b></div><div class="swatches" id="swatches"></div></div>
+    <button class="btn primary" id="play" style="width:100%;height:54px;font-size:20px;margin-top:10px">Giriş yap</button>
+    <p class="muted" id="authHint" style="text-align:center;margin:6px 0 0"></p>
+  </div>
+  <!-- Kayıtlı oturum -->
+  <div id="welcomeBox" style="display:none;text-align:center">
+    <p style="font-size:18px">Tekrar hoş geldin, <b id="wName"></b> 👋</p>
+    <button class="btn primary" id="wPlay" style="width:100%;height:54px;font-size:20px">Oyna</button>
+    <button class="btn" id="wOut" style="width:100%;margin-top:8px;font-size:15px">Başka hesapla gir</button>
+  </div>
   <p class="muted" id="modeInfo" style="text-align:center;margin-bottom:0"></p>
   <p class="muted" style="margin-bottom:0">📱 Sol alt köşeden sürükleyerek yürü, tarlaya dokunarak ek veya hasat et.<br>💻 WASD / ok tuşları ile yürü, E veya boşluk ile etkileşime geç, tıklayarak ek.</p>
 </div></div>
@@ -222,26 +238,34 @@ function saveNow(){
 const hasConfig = !!(FIREBASE_CONFIG && FIREBASE_CONFIG.apiKey);
 $('modeInfo').innerHTML = hasConfig ? '🟢 Çevrimiçi mod: herkes aynı köyde.' : '🟡 Test modu: Firebase bağlı değil, tek kişilik.';
 
-async function startOnline(){
+let FBA = null; // auth fonksiyonları
+async function loadFirebase(){
   const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
   const [app, auth, db] = await Promise.all([import(base+'firebase-app.js'), import(base+'firebase-auth.js'), import(base+'firebase-database.js')]);
   const fbApp = app.initializeApp(FIREBASE_CONFIG);
-  const a = auth.getAuth(fbApp);
-  const user = await new Promise((res,rej)=>{
-    const off = auth.onAuthStateChanged(a, u=>{ if(u){ off(); res(u); } });
-    auth.signInAnonymously(a).catch(rej);
-  });
+  FBA = {...auth, a:auth.getAuth(fbApp)};
   FB = {...db, db:db.getDatabase(fbApp)};
+}
+function firstAuthState(){ return new Promise(res=>{ const off = FBA.onAuthStateChanged(FBA.a, u=>{ off(); res(u); }); }); }
+// Kullanıcı adını Firebase'in istediği e-posta biçimine çevir (oyuncu bunu görmez)
+const TRMAP = {'ç':'c','ğ':'g','ı':'i','i̇':'i','ö':'o','ş':'s','ü':'u'};
+function nickKey(n){ return n.toLocaleLowerCase('tr-TR').replace(/[çğıöşü]/g,c=>TRMAP[c]).replace(/[^a-z0-9_]/g,''); }
+const nickEmail = n => nickKey(n)+'@'+(FIREBASE_CONFIG.authDomain||'oyun.local');
+
+async function enterOnline(user, fresh){
   S.uid = user.uid; S.online = true;
   FB.onValue(FB.ref(FB.db,'.info/serverTimeOffset'), s=>{ S.timeOffset = s.val()||0; });
 
   // Kayıtlı oyuncu var mı?
   const snap = await FB.get(FB.ref(FB.db,'players/'+S.uid));
-  if(snap.exists()){ const d=snap.val(); S.me = {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}}; S.lot = d.lot; }
-  else {
+  if(snap.exists()){
+    const d=snap.val(); S.me = {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}}; S.lot = d.lot;
+    S.name = d.name || S.name; S.color = d.color || S.color;
+  } else {
     S.lot = await claimLot();
     if(S.lot<0) throw new Error('Köy dolu! Şu an boş arsa yok.');
     S.me = START();
+    if(!S.name) S.name = (user.email||'oyuncu').split('@')[0];
   }
   saveNow();
 
@@ -271,6 +295,13 @@ async function startOnline(){
   FB.onValue(FB.ref(FB.db,'.info/connected'), s=>{ if(s.val()){ FB.onDisconnect(myPres).remove(); sendPresence(true); } });
 }
 
+async function logout(){
+  if(!S.online){ location.reload(); return; }
+  try{ await FB.remove(FB.ref(FB.db,'presence/'+S.uid)); }catch(e){}
+  await FBA.signOut(FBA.a);
+  location.reload();
+}
+
 async function claimLot(){
   for(let n=0;n<LOTS;n++){
     const r = await FB.runTransaction(FB.ref(FB.db,'lots/'+n), cur => (cur===null||cur===S.uid) ? S.uid : undefined);
@@ -291,37 +322,95 @@ function sendPresence(force){
 }
 
 /* ---------------- Giriş ekranı ---------------- */
+function startGame(){
+  const o=lotOrigin(S.lot); S.x=o.x+4.5; S.y=o.y-1.3;
+  $('login').classList.remove('on');
+  renderHUD(); loop.started || requestAnimationFrame(loop);
+  toast(S.online?'Köye hoş geldin, '+S.name+'!':'Test modu: tek kişilik');
+}
+const AUTH_ERR = {
+  'auth/email-already-in-use':'Bu kullanıcı adı alınmış, başka bir tane dene',
+  'auth/invalid-credential':'Kullanıcı adı veya şifre yanlış',
+  'auth/invalid-login-credentials':'Kullanıcı adı veya şifre yanlış',
+  'auth/wrong-password':'Kullanıcı adı veya şifre yanlış',
+  'auth/user-not-found':'Böyle bir kullanıcı yok — önce "Hesap aç"',
+  'auth/weak-password':'Şifre en az 6 karakter olmalı',
+  'auth/too-many-requests':'Çok fazla deneme yaptın, biraz bekle',
+  'auth/network-request-failed':'İnternet bağlantısı yok gibi',
+  'auth/operation-not-allowed':'Firebase\'de E-posta/Şifre girişi açık değil (kurulum adımı)',
+};
 (function(){
-  const saved = (()=>{ try{ return JSON.parse(localStorage.getItem('tk_profile')||'{}'); }catch(e){ return {}; } })();
-  $('nameIn').value = saved.name||'';
-  S.color = saved.color||COLORS[Math.floor(Math.random()*COLORS.length)];
+  let mode='login';
+  const playBtn=$('play');
   const sw=$('swatches');
+  S.color = COLORS[Math.floor(Math.random()*COLORS.length)];
   COLORS.forEach(c=>{ const d=document.createElement('div'); d.className='sw'+(c===S.color?' on':''); d.style.background=c; d.onclick=()=>{ S.color=c; [...sw.children].forEach(e=>e.classList.toggle('on',e===d)); }; sw.appendChild(d); });
-  $('play').onclick = async ()=>{
-    const name = $('nameIn').value.trim().replace(/\s+/g,' ');
-    if(name.length<2){ toast('Adın en az 2 harf olsun'); return; }
-    S.name=name;
-    try{ localStorage.setItem('tk_profile', JSON.stringify({name, color:S.color})); }catch(e){}
-    $('play').disabled=true; $('play').textContent='Bağlanıyor…';
-    try{
-      if(hasConfig) await startOnline();
-      else {
-        S.uid='local';
-        let d=null; try{ d=JSON.parse(localStorage.getItem('tk_save')||'null'); }catch(e){}
-        S.me = d ? {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}} : START();
-        S.lot = 0; saveNow();
-      }
-      const o=lotOrigin(S.lot); S.x=o.x+4.5; S.y=o.y-1.3;
-      $('login').classList.remove('on');
-      renderHUD(); loop.started || requestAnimationFrame(loop);
-      toast(S.online?'Köye hoş geldin, '+S.name+'!':'Test modu: tek kişilik');
-    }catch(e){
-      console.error(e);
-      $('play').disabled=false; $('play').textContent='Tekrar dene';
-      toast('Bağlantı hatası: '+(e.message||e.code||e));
-    }
+  const setMode=m=>{
+    mode=m;
+    [...$('authTabs').children].forEach(b=>b.classList.toggle('on',b.dataset.m===m));
+    $('pw2Wrap').style.display = m==='signup'?'block':'none';
+    $('colorWrap').style.display = m==='signup'?'block':'none';
+    $('pwIn').autocomplete = m==='signup'?'new-password':'current-password';
+    playBtn.textContent = m==='signup'?'Hesap aç ve oyna':'Giriş yap';
+    $('authHint').textContent = m==='signup'?'Şifreni unutma: aynı ad ve şifreyle telefondan da bilgisayardan da girersin.':'';
   };
-  $('nameIn').addEventListener('keydown',e=>{ if(e.key==='Enter') $('play').click(); });
+  $('authTabs').onclick=e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.m); };
+  const show=id=>{ for(const x of ['loading','authBox','welcomeBox']) $(x).style.display = x===id?'block':'none'; };
+
+  if(!hasConfig){
+    // Test modu: sadece isim
+    show('authBox'); $('authTabs').style.display='none'; $('pwWrap').style.display='none'; $('colorWrap').style.display='block';
+    playBtn.textContent='Oyna (test)';
+    playBtn.onclick=()=>{
+      const name=$('nameIn').value.trim(); if(name.length<2){ toast('Adın en az 2 harf olsun'); return; }
+      S.name=name; S.uid='local';
+      let d=null; try{ d=JSON.parse(localStorage.getItem('tk_save')||'null'); }catch(e){}
+      S.me = d ? {...START(), ...d, plots:d.plots||{}, seeds:d.seeds||{}, crops:d.crops||{}} : START();
+      S.lot=0; saveNow(); startGame();
+    };
+    return;
+  }
+
+  const go = async (fn)=>{
+    const old=playBtn.textContent; playBtn.disabled=true; $('wPlay').disabled=true; playBtn.textContent='Bağlanıyor…';
+    try{ await fn(); startGame(); }
+    catch(e){ console.error(e); toast(AUTH_ERR[e.code] || ('Hata: '+(e.message||e.code||e))); playBtn.textContent=old; }
+    playBtn.disabled=false; $('wPlay').disabled=false;
+  };
+
+  playBtn.onclick=()=>go(async()=>{
+    const name=$('nameIn').value.trim(), pw=$('pwIn').value;
+    if(!/^[A-Za-z0-9_ÇĞİÖŞÜçğıöşü]{3,14}$/.test(name)) throw {code:'x',message:'Kullanıcı adı 3–14 harf/rakam olmalı (boşluk yok)'};
+    if(pw.length<6) throw {code:'auth/weak-password'};
+    if(mode==='signup'){
+      if(pw!==$('pw2In').value) throw {code:'x',message:'Şifreler aynı değil'};
+      const cred = await FBA.createUserWithEmailAndPassword(FBA.a, nickEmail(name), pw);
+      S.name=name; await enterOnline(cred.user, true);
+    } else {
+      const cred = await FBA.signInWithEmailAndPassword(FBA.a, nickEmail(name), pw);
+      S.name=''; await enterOnline(cred.user, false);
+    }
+  });
+  const onEnter=e=>{ if(e.key==='Enter') playBtn.click(); };
+  $('nameIn').addEventListener('keydown',onEnter); $('pwIn').addEventListener('keydown',onEnter); $('pw2In').addEventListener('keydown',onEnter);
+  $('wOut').onclick=async()=>{ await FBA.signOut(FBA.a); show('authBox'); };
+
+  // Açılışta: Firebase'i yükle, kayıtlı oturum var mı bak
+  (async()=>{
+    try{
+      await loadFirebase();
+      const u = await firstAuthState();
+      if(u && !u.isAnonymous){
+        let nm=(u.email||'').split('@')[0];
+        try{ const s=await FB.get(FB.ref(FB.db,'players/'+u.uid+'/name')); if(s.exists()) nm=s.val(); }catch(e){}
+        $('wName').textContent=nm; show('welcomeBox');
+        $('wPlay').onclick=()=>go(()=>enterOnline(u,false));
+      } else {
+        if(u && u.isAnonymous) await FBA.signOut(FBA.a);
+        show('authBox'); setMode('login');
+      }
+    }catch(e){ console.error(e); $('loading').textContent='Sunucuya bağlanılamadı. Sayfayı yenile.'; }
+  })();
 })();
 
 /* ---------------- HUD ---------------- */
@@ -419,6 +508,7 @@ function openShop(tab){
 $('pBody').addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;
   const me=S.me;
+  if(b.dataset.logout!==undefined){ logout(); return; }
   if(b.dataset.tab){ openShop(b.dataset.tab); return; }
   if(b.dataset.sell){
     const ids = b.dataset.sell==='*'?CROP_IDS:[b.dataset.sell]; let gain=0;
@@ -447,6 +537,7 @@ function openBoard(){
   let h='<p class="muted" style="margin-top:0">Zenginlik = tarla büyüklüğü</p>';
   list.forEach((e,i)=>{ const on = e.id===S.uid || S.others.has(e.id);
     h+=`<div class="row"><span class="em">${['🥇','🥈','🥉'][i]||(i+1)}</span><span class="sw" style="width:20px;height:20px;border-width:2px;background:${esc(e.p.color||'#999')}"></span><div class="grow"><b>${esc(e.p.name)}</b>${e.id===S.uid?' (sen)':''} ${on?'<span class="badge" style="background:#2fa86a">çevrimiçi</span>':''}<div class="muted">${e.p.w}×${e.p.h} · ekili ${e.planted}</div></div><b>${e.score} parsel</b></div>`; });
+  h+=`<p class="muted" style="margin:12px 0 4px">Hesap: <b>${esc(S.name)}</b></p><button class="btn" style="width:100%;font-size:15px" data-logout>🚪 Çıkış yap</button>`;
   openPanel('board','🏆 Zengin Çiftçiler',h);
 }
 
