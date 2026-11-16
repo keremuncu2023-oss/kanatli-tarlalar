@@ -23,7 +23,7 @@
   .slot small{font-size:12px;font-weight:700;margin-top:2px}
   .slot.sel{border-color:var(--accent);background:#ffe7c9;box-shadow:inset 0 0 0 2px var(--accent)}
   .slot.empty{opacity:.45}
-  #action{position:fixed;z-index:6;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));min-width:96px;height:64px;border-radius:20px;font-size:17px;display:none}
+  #action{position:fixed;z-index:6;left:16px;bottom:calc(84px + env(safe-area-inset-bottom));min-width:96px;height:64px;border-radius:20px;font-size:17px;display:none}
   #toast{position:fixed;z-index:20;top:calc(64px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:rgba(40,25,10,.88);color:#fff;padding:8px 14px;border-radius:12px;font-weight:700;font-size:15px;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90vw;text-align:center}
   #toast.on{opacity:1}
   .modal{position:fixed;inset:0;z-index:30;background:rgba(20,30,15,.55);display:none;align-items:center;justify-content:center;padding:14px}
@@ -101,7 +101,7 @@
     <button class="btn" id="wOut" style="width:100%;margin-top:8px;font-size:15px">Başka hesapla gir</button>
   </div>
   <p class="muted" id="modeInfo" style="text-align:center;margin-bottom:0"></p>
-  <p class="muted" style="margin-bottom:0">📱 Sol alt köşeden sürükleyerek yürü, tarlaya dokunarak ek veya hasat et.<br>💻 WASD / ok tuşları ile yürü, E veya boşluk ile etkileşime geç, tıklayarak ek.</p>
+  <p class="muted" style="margin-bottom:0">📱 Sağ alttan sürükleyerek yürü, tarlaya dokunarak ek veya hasat et.<br>💻 WASD / ok tuşları ile yürü, E veya boşluk ile etkileşime geç, tıklayarak ek.</p>
 </div></div>
 
 <!-- Pazar / Hangar / Liste -->
@@ -582,7 +582,7 @@ const taps=new Map();
 cv.addEventListener('pointerdown',e=>{
   if(!S.me) return;
   cv.setPointerCapture(e.pointerId);
-  if(e.pointerType!=='mouse' && e.clientX<VW*0.45 && joy.id===null){ joy.id=e.pointerId; joy.ox=e.clientX; joy.oy=e.clientY; joy.dx=joy.dy=0; return; }
+  if(e.pointerType!=='mouse' && e.clientX>VW*0.55 && joy.id===null){ joy.id=e.pointerId; joy.ox=e.clientX; joy.oy=e.clientY; joy.dx=joy.dy=0; return; }
   taps.set(e.pointerId,{x:e.clientX,y:e.clientY,t:performance.now()});
 });
 cv.addEventListener('pointermove',e=>{
@@ -884,7 +884,7 @@ function render(time){
     ctx.fillStyle='rgba(255,248,236,.85)'; ctx.beginPath(); ctx.arc(joy.ox+joy.dx*55,joy.oy+joy.dy*55,24,0,7); ctx.fill(); ctx.stroke();
   } else if(matchMedia('(pointer:coarse)').matches){
     ctx.fillStyle='rgba(255,248,236,.12)'; ctx.strokeStyle='rgba(255,248,236,.35)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(80,VH-150,45,0,7); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(VW-80,VH-150,45,0,7); ctx.fill(); ctx.stroke();
   }
 }
 
