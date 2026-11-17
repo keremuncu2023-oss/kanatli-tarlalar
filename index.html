@@ -189,6 +189,7 @@ function seedPrice(id,loc='koy'){ const m=SEED_MUL[loc]||{}; return Math.max(1,M
 const PLANES = {
   c150:    {ad:'Hurda Cessna 150',     fiyat:1500,  menzil:150,  kap:10, yakit:80,   perKm:0.45, wear:1.6, start:{engine:55,airframe:60,inst:60}, tamir:5,  em:'🛩️', acik:'Eski, gürültülü, sık arıza yapar. Kısa menzil: büyük şehirlere ancak aktarmalı gider (ör. Bursa → Balıkesir → İzmir).'},
   c172:    {ad:'Cessna 172',           fiyat:9000,  menzil:450,  kap:25, yakit:180,  perKm:0.36, wear:1.0, start:{engine:85,airframe:85,inst:90}, tamir:10, em:'🛩️', acik:'Güvenilir, orta menzil. İzmir ve Ankara\'ya gider.'},
+  atr72:   {ad:'ATR 72-600F',          fiyat:220000, menzil:1500, kap:30, yakit:5000, perKm:1.6, wear:0.6, start:{engine:100,airframe:100,inst:100}, tamir:60, em:'🛩️', acik:'Bölgesel kargo turbopropu. 📦 Kargo menüsünden yakın şehirlere (≤320 km) 8 tona kadar küçük kargo işleri alır.'},
   b777:    {ad:'Boeing 777F',          fiyat:1800000, menzil:9000, kap:100, yakit:20000, perKm:6, wear:0.35, start:{engine:100,airframe:100,inst:100}, tamir:300, em:'🛫', acik:'Dev kargo jeti. Hangarda 📦 Kargo menüsünden şehirler arası kargo işleri alır (100 tona kadar). Her yere direkt uçar.'},
   kingair: {ad:'Beechcraft King Air',  fiyat:45000, menzil:1300, kap:60, yakit:1400, perKm:0.95, wear:0.6, start:{engine:95,airframe:95,inst:95}, tamir:30, em:'✈️', acik:'Çift motorlu, hızlı, büyük yük. Her yere gider.'},
 };
@@ -417,8 +418,8 @@ function farmsOf(p){
   if(!p) return [];
   if(p.farms) return p.farms;
   const out=[];
-  if(p.lot!=null && p.lot>=0) out.push({lot:p.lot, w:p.w||3, h:p.h||3, plots:p.plots||{}, depo:p.depo||null, mak:p.mak||null});
-  for(const f of objVals(p.ek)) out.push(f.map&&f.map!=='koy' ? {lot:f.lot, map:f.map, w:f.w||3, h:f.h||3, plots:f.plots||{}, depo:f.depo||null, mak:f.mak||null} : {lot:f.lot, w:f.w||3, h:f.h||3, plots:f.plots||{}, depo:f.depo||null, mak:f.mak||null});
+  if(p.lot!=null && p.lot>=0) out.push({lot:p.lot, w:p.w||3, h:p.h||3, plots:p.plots||{}, depo:p.depo||null, mak:normMak(p.mak)});
+  for(const f of objVals(p.ek)) out.push(f.map&&f.map!=='koy' ? {lot:f.lot, map:f.map, w:f.w||3, h:f.h||3, plots:f.plots||{}, depo:f.depo||null, mak:normMak(f.mak)} : {lot:f.lot, w:f.w||3, h:f.h||3, plots:f.plots||{}, depo:f.depo||null, mak:normMak(f.mak)});
   return out;
 }
 const plotCount = p => farmsOf(p).reduce((a,f)=>a+f.w*f.h,0);
@@ -426,6 +427,7 @@ const plantedCount = p => farmsOf(p).reduce((a,f)=>a+Object.keys(f.plots||{}).le
 function loadMe(d){
   const me = {...START(), ...d};
   me.farms = farmsOf(d).map(f=>({...f, plots:{...(f.plots||{})}, depo: f.depo ? {seeds:{...(f.depo.seeds||{})}, crops:{...(f.depo.crops||{})}, items:{...(f.depo.items||{})}} : null}));
+  me.fixBicer=1;
   me.seeds = {...(d.seeds||{})}; me.crops = {...(d.crops||{})}; me.items = {...(d.items||{})};
   me.trip = d.trip || null;
   { let ps = objVals(d.planes).map(p=>({...p, cond:{...p.cond}}));
@@ -445,7 +447,7 @@ function saveSoon(){ clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400);
 function serialize(){
   const me=S.me, f0=me.farms[0]||{lot:-1,w:0,h:0,plots:{}};
   return {name:S.name, color:S.color, money:Math.max(0,Math.round(me.money)),
-    lot:f0.lot, w:f0.w, h:f0.h, plots:f0.plots, depo:f0.depo||null, mak:f0.mak||null, job:me.job||null, cargoDone:me.cargoDone||0, ek:me.farms.slice(1),
+    lot:f0.lot, w:f0.w, h:f0.h, plots:f0.plots, depo:f0.depo||null, mak:f0.mak||null, fixBicer:me.fixBicer||0, job:me.job||null, cargoDone:me.cargoDone||0, ek:me.farms.slice(1),
     seeds:me.seeds, crops:me.crops, items:me.items, plane:me.plane||null, planes:me.planes, pi:me.pi||0, trip:me.trip||null,
     animals:me.animals, anT:me.anT, barn:me.barn||1, rod:me.rod||1, vehicles:me.vehicles||[], loan:me.loan||null, ptrade:me.ptrade||null, updated:Date.now()};
 }
@@ -864,7 +866,7 @@ function openHangar(){
   let h='';
   if(!me.planes.length) hangarTab='al';
   const tabs=[['ucak','Uçaklarım'],['uc','Uçuş']];
-  if(pl && pl.model==='b777') tabs.push(['kargo','📦 Kargo']);
+  if(pl && CARGO_PROF[pl.model]) tabs.push(['kargo','📦 Kargo']);
   tabs.push(['al','Uçak al']);
   if(!tabs.some(t=>t[0]===hangarTab)) hangarTab='ucak';
   h+=`<div class="tabs">${tabs.map(([k,l])=>`<button class="btn tab ${hangarTab===k?'on':''}" data-htab="${k}">${l}</button>`).join('')}</div>`;
@@ -874,7 +876,7 @@ function openHangar(){
       h+=`<div class="row"><span class="em">${P.em}</span><div class="grow"><b>${P.ad}</b><div class="muted">${P.acik}<br>Menzil ${P.menzil} km · Yük ${P.kap} · Depo ${P.yakit} L</div></div><button class="btn ${me.money>=P.fiyat?'primary':''}" data-buyplane="${id}" ${me.money>=P.fiyat?'':'disabled'}>💰${fmtMoney(P.fiyat)}</button></div>`;
     }
     if(!me.planes.length) h+=rideHTML(Object.keys(CITIES));
-  } else if(hangarTab==='kargo' && pl && pl.model==='b777'){
+  } else if(hangarTab==='kargo' && pl && CARGO_PROF[pl.model]){
     h+=cargoHTML();
   } else if(hangarTab==='ucak'){
     h+=`<p class="muted" style="margin:4px 0">${me.planes.length} uçağın var. Bakım ve yakıt köy hangarındaki uçaklara yapılır; başka şehirdekiler orada acil tamir/yakıt alabilir.</p>`;
@@ -1083,7 +1085,7 @@ function openCityAirport(){
   const price=FUEL_PRICE*C.yakitCarp, need=PD.yakit-pl.fuel;
   h+=`<div class="row"><div class="grow">⛽ ${Math.round(pl.fuel)} / ${PD.yakit} L <span class="muted">(litresi 💰${price.toFixed(2)})</span></div>${need>0.5?`<button class="btn" data-crefuel>Doldur 💰${fmtMoney(Math.ceil(need*price))}</button>`:''}</div>`;
   if(pl.cond.engine<35) h+=`<div class="row"><div class="grow">Acil motor tamiri (→35)<div class="muted">Asıl bakım köy hangarında yapılır</div></div><button class="btn" data-crepair>💰${fmtMoney(Math.round((35-pl.cond.engine)*PD.tamir*2.5))}</button></div>`;
-  if(pl.model==='b777') h+=cargoHTML();
+  if(CARGO_PROF[pl.model]) h+=cargoHTML();
   h+=`<p style="margin:12px 0 2px"><b>🛫 Nereye?</b></p>`;
   if(pl.cond.engine<=0) h+=`<p class="muted">🛑 Motor çalışmıyor — acil tamir yap.</p>`;
   for(const dest of ['koy',...Object.keys(CITIES).filter(k=>k!==M.id)].sort((a,b)=>legKm(M.id,a)-legKm(M.id,b))){
@@ -1558,6 +1560,18 @@ function drawHangar(time){
   for(let i=0;i<4;i++){ ctx.fillStyle=i%2?'#fff':'#f07a26'; ctx.fillRect(wx+3+i*7,wy+2+fl*i/4,7,8-i); }
 }
 function drawPlane2D(cx,cy,model,stripe){
+  if(model==='atr72'){ // ATR 72 (üstten): uzun ince gövde, düz yüksek kanat, iki motor, T-kuyruk
+    ctx.save(); ctx.translate(cx,cy); ctx.scale(0.95,0.95);
+    ctx.fillStyle='rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(5,9,42,26,0,0,7); ctx.fill();
+    ctx.fillStyle='#f4f4f2'; rr(-40,-4.5,74,9,4.5); ctx.fill();                    // gövde (burun solda)
+    ctx.beginPath(); ctx.moveTo(34,-3.5); ctx.lineTo(42,-1.5); ctx.lineTo(42,1.5); ctx.lineTo(34,3.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#ececea'; ctx.beginPath(); ctx.moveTo(-6,-27); ctx.lineTo(3,-27); ctx.lineTo(4,-4); ctx.lineTo(4,4); ctx.lineTo(3,27); ctx.lineTo(-6,27); ctx.lineTo(-8,4); ctx.lineTo(-8,-4); ctx.closePath(); ctx.fill(); // kanat
+    ctx.fillStyle=stripe; ctx.fillRect(-6,-27,9,2); ctx.fillRect(-6,25,9,2); ctx.fillRect(-34,-1.2,66,2.4);
+    for(const s of [-1,1]){ ctx.fillStyle='#f4f4f2'; rr(-15,s*8.5-2.5,16,5,2.5); ctx.fill(); ctx.fillStyle='#2b2b2e'; ctx.fillRect(-17,s*8.5-7,1.5,14); }  // motorlar + pervane
+    ctx.fillStyle=stripe; ctx.fillRect(30,-1,9,2); ctx.fillStyle='#f4f4f2'; rr(33,-8,6,16,2); ctx.fill();   // T-kuyruk
+    ctx.fillStyle='#4d6f8c'; ctx.fillRect(-38,-2.5,3,5);
+    ctx.restore(); return;
+  }
   if(model==='b777'){ // dev kargo jeti (üstten)
     ctx.save(); ctx.translate(cx,cy); ctx.scale(1.05,1.05);
     ctx.fillStyle='rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(6,10,70,20,0,0,7); ctx.fill();
@@ -2646,20 +2660,24 @@ const MACH = {
           acik:'İçine koyduğun tohumu boş parsellere kendisi eker.'},
   bicer: {ad:'Biçerdöver',    em:'🌾', fiyat:40000, mat:{kereste:20, boru:10}, cap:300,
           acik:'Olgunlaşan ürünleri kendisi biçer, deposunda tutar. Ekim makinesiyle birlikte biçer → yeniden eker.'},
-  gubre: {ad:'Gübreleme ünitesi', em:'🧪', fiyat:30000, mat:{tel:15}, cap:200, need:'ekici',
-          acik:'Ekim makinesi ekerken gübre de atar: ürünler %40 hızlı büyür. Önce ekim makinesi gerekir.'},
+  gubre: {ad:'Gübreleme ünitesi', em:'🧪', fiyat:30000, mat:{tel:15}, cap:200,
+          acik:'Tarlada büyüyen gübresiz her ürüne gübre atar: %40 hızlı büyür. Tek başına da çalışır.'},
 };
 const MACH_IDS = Object.keys(MACH);
 const machPos = n => { const p=lotPos(n); return {x:p.x+12.5, y:p.y+4.2}; };
 const objSum = o => Object.values(o||{}).reduce((a,b)=>a+(+b||0),0);
 function farmMak(f){ if(!f) return null; f.mak=f.mak||{}; return f.mak; }
+// yüklerken: Firebase boş alt nesneleri saklamadığı için makineleri tamamla, kalıcı işaret koy
+function normMak(m){ if(!m) return null; const o={}; if(m.ekici) o.ekici={on:1, s:{...(m.ekici.s||{})}, sel:m.ekici.sel||'bugday'}; if(m.bicer) o.bicer={on:1, c:{...(m.bicer.c||{})}}; if(m.gubre) o.gubre={on:1, n:m.gubre.n||0}; return Object.keys(o).length?o:null; }
 const hasMak = f => f && f.mak && MACH_IDS.some(k=>f.mak[k]);
 
 /* ---------- çalıştırma (geriye dönük hesap) ---------- */
 function runMachines(f, tNow){
-  const mk=f.mak; if(!mk || (!mk.ekici && !mk.bicer)) return 0;
+  const mk=f.mak; if(!mk || (!mk.ekici && !mk.bicer && !mk.gubre)) return 0;
   const E=mk.ekici, B=mk.bicer, G=mk.gubre; let work=0;
   if(E){ E.s=E.s||{}; } if(B){ B.c=B.c||{}; }
+  // gübreleme ünitesi bağımsız: elle ya da makineyle ekilmiş, gübresiz ve henüz olmamış ürünlere gübre atar
+  if(G && (G.n||0)>0){ for(const k in f.plots){ const pl=f.plots[k]; if(!pl || pl.g || !CROPS[pl.c]) continue; if(pl.t+cropDur(pl)<=tNow) continue; if(G.n<=0) break; G.n--; pl.g=1; work++; } }
   const pickSeed = ()=>{ if(!E) return null; const sel=E.sel; if(sel && (E.s[sel]||0)>0 && unlocked(sel)) return sel; for(const id of CROP_IDS) if((E.s[id]||0)>0 && unlocked(id)) return id; return null; };
   for(let py=0;py<f.h;py++) for(let px=0;px<f.w;px++){
     const k=px+'_'+py; let guard=0, tFree=tNow;
@@ -2717,7 +2735,7 @@ function buyMachine(id, fi){
   if(me.money<D.fiyat){ toast('Paran yetmiyor'); return; }
   for(const [m,n] of Object.entries(D.mat)) if((me.items[m]||0)<n){ toast(ITEMS[m].ad+' eksik ('+n+' lazım)'); return; }
   me.money-=D.fiyat; for(const [m,n] of Object.entries(D.mat)) me.items[m]-=n;
-  mk[id] = id==='ekici'?{s:{}, sel:'bugday'} : id==='bicer'?{c:{}} : {n:0};
+  mk[id] = id==='ekici'?{on:1, s:{}, sel:'bugday'} : id==='bicer'?{on:1, c:{}} : {on:1, n:0};
   saveNow(); renderHUD();
   toast('🎉 '+D.em+' '+D.ad+' tarlana kuruldu! Tarlanın yanındaki makineye git.');
   M.id==='koy'?openShop('alet'):openCityMarket();
@@ -2796,7 +2814,7 @@ function drawMachines(n, f, mine, time){
 }
 
 /* sürüm etiketi — hangi sürümün yüklü olduğunu görmek için */
-(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 17.11 22:59'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
+(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 18.11 00:13'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
 
 /* ---------- Araçlarım: üst menüden araçları yanına ışınla ---------- */
 (()=>{
@@ -2844,17 +2862,22 @@ const CARGO_TYPES = [
   {ad:'Posta',            em:'✉️', m:0.90, t:[5,20]},
 ];
 const CARGO_WIN = 20*60*1000;
+// kargo yapabilen uçaklar: 777F her yere büyük işler; ATR 72 yakın yerlere küçük, daha az kazandıran işler
+const CARGO_PROF = {
+  b777:  {n:5, maxKm:9999, tmax:100, payMul:1.0},
+  atr72: {n:3, maxKm:320,  tmax:8,   payMul:0.75},
+};
 function cargoRng(seed){ let a=seed>>>0; return ()=>{ a=(a+0x6D2B79F5)>>>0; let t=a; t=Math.imul(t^(t>>>15),t|1); t^=t+Math.imul(t^(t>>>7),t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
 function strHash(s){ let h=2166136261; for(const ch of s){ h^=ch.charCodeAt(0); h=Math.imul(h,16777619); } return h>>>0; }
 function cargoPay(from,to,ton,m){ const km=legKm(from,to); return Math.round((5000+km*85)*Math.pow(ton/30,0.55)*m/500)*500; }
-function cargoOffers(loc){
-  const w=Math.floor(Date.now()/CARGO_WIN), r=cargoRng(strHash(loc+'#'+w));
-  const dests=LOCS.filter(k=>k!==loc), out=[];
-  for(let i=0;i<5;i++){
+function cargoOffers(loc, model='b777'){
+  const P=CARGO_PROF[model]||CARGO_PROF.b777, w=Math.floor(Date.now()/CARGO_WIN), r=cargoRng(strHash(loc+'#'+model+'#'+w));
+  const dests=LOCS.filter(k=>k!==loc && legKm(loc,k)<=P.maxKm), out=[]; if(!dests.length) return out;
+  for(let i=0;i<P.n;i++){
     // büyük şehirler daha sık
     let to; do{ to=dests[Math.floor(r()*dests.length)]; } while(CITIES[to] && CITIES[to].kasaba && r()<0.5);
-    const T=CARGO_TYPES[Math.floor(r()*CARGO_TYPES.length)], ton=Math.round(T.t[0]+r()*(T.t[1]-T.t[0]));
-    out.push({id:loc+'-'+w+'-'+i, from:loc, to, ad:T.ad, em:T.em, ton, pay:cargoPay(loc,to,ton,T.m)});
+    const T=CARGO_TYPES[Math.floor(r()*CARGO_TYPES.length)], lo=Math.min(T.t[0],P.tmax*0.3), hi=Math.min(T.t[1],P.tmax), ton=Math.max(1,Math.round(lo+r()*(hi-lo)));
+    out.push({id:model+'-'+loc+'-'+w+'-'+i, from:loc, to, ad:T.ad, em:T.em, ton, pay:Math.round(cargoPay(loc,to,ton,T.m)*P.payMul/100)*100});
   }
   return out;
 }
@@ -2863,17 +2886,19 @@ function myLoc(){ return S.me.trip && S.me.trip.at ? S.me.trip.at : 'koy'; }
 
 function cargoHTML(){
   const me=S.me, pl=me.plane, loc=myLoc();
-  if(!pl || pl.model!=='b777') return `<p class="muted">📦 Kargo işleri sadece <b>Boeing 777F</b> ile yapılır.</p>`;
+  if(!pl || !CARGO_PROF[pl.model]) return `<p class="muted">📦 Kargo işleri <b>ATR 72-600F</b> veya <b>Boeing 777F</b> ile yapılır.</p>`;
+  const CP=CARGO_PROF[pl.model];
   let h='';
   if(me.job){
     const j=me.job;
     h+=`<div class="row" style="border:3px solid #2fa86a;border-radius:12px;padding:8px"><span class="em">${j.em}</span><div class="grow"><b>Aktif iş: ${j.ton} t ${j.ad}</b><div class="muted">${LOC_AD[j.from]} → <b>${LOC_AD[j.to]}</b> · ${legKm(j.from,j.to)} km · ${j.loaded?'✅ uçakta':'⏳ '+LOC_AD[j.from]+'\'de yüklenecek'}</div><div>Ödeme: <b>💰${fmtMoney(j.pay)}</b> (teslimde)</div></div><button class="btn" style="font-size:13px" data-jcancel>İptal<br><small>-💰${fmtMoney(Math.round(j.pay*0.1))}</small></button></div>`;
     h+=`<p class="muted">Kargoyu <b>${LOC_AD[j.to]}</b>'e götür, indiğinde ödeme otomatik yatar. Uçuş listesinde hedefin yanında 📦 işareti var.</p>`;
   }
-  const offs=cargoOffers(loc);
-  h+=`<p style="margin:10px 0 4px"><b>📋 ${LOC_AD[loc]} kargo teklifleri</b> <span class="muted">· ${Math.ceil(cargoLeft()/60000)} dk sonra yenilenir</span></p>`;
+  const offs=cargoOffers(loc, pl.model);
+  h+=`<p style="margin:10px 0 4px"><b>📋 ${LOC_AD[loc]} · ${PLANES[pl.model].ad} için teklifler</b> <span class="muted">· ${Math.ceil(cargoLeft()/60000)} dk sonra yenilenir${CP.maxKm<9999?' · en fazla '+CP.maxKm+' km, '+CP.tmax+' t':''}</span></p>`;
+  if(!offs.length) h+='<p class="muted">Bu uçağın gidebileceği yakın bir yer için iş yok.</p>';
   for(const o of offs){
-    const km=legKm(loc,o.to), fuelNeed=Math.ceil(km*PLANES.b777.perKm*1.1), taken=me.job&&me.job.id===o.id;
+    const km=legKm(loc,o.to), fuelNeed=Math.ceil(km*PLANES[pl.model].perKm*1.1), taken=me.job&&me.job.id===o.id;
     h+=`<div class="row"><span class="em">${o.em}</span><div class="grow"><b>${LOC_AD[o.to]}</b> <span class="muted">${km} km</span><div>${o.ton} t ${o.ad}</div><div class="muted">⛽ ~${fuelNeed} L (💰${fmtMoney(Math.ceil(fuelNeed*FUEL_PRICE))})</div></div>`+
       `<button class="btn ${me.job?'':'primary'}" style="font-size:14px" data-jtake="${o.id}" ${me.job?'disabled':''}>${taken?'✓ Alındı':'Al · 💰'+fmtMoney(o.pay)}</button></div>`;
   }
@@ -2882,8 +2907,8 @@ function cargoHTML(){
 }
 function takeJob(id){
   const me=S.me; if(me.job){ toast('Önce aktif işi bitir'); return; }
-  if(!me.plane || me.plane.model!=='b777'){ toast('Boeing 777F lazım'); return; }
-  const o=cargoOffers(myLoc()).find(x=>x.id===id); if(!o){ toast('Teklif süresi doldu'); return; }
+  if(!me.plane || !CARGO_PROF[me.plane.model]){ toast('Kargo uçağı lazım'); return; }
+  const o=cargoOffers(myLoc(), me.plane.model).find(x=>x.id===id); if(!o){ toast('Teklif süresi doldu'); return; }
   me.job={...o, loaded:false}; saveNow();
   toast(o.em+' İş alındı: '+o.ton+' t '+o.ad+' → '+LOC_AD[o.to]);
   refreshCargoPanel();
@@ -2895,10 +2920,10 @@ function cancelJob(){
 }
 function refreshCargoPanel(){ const k=panel.dataset.kind; if(k==='hangar') openHangar(); else if(k==='cair') openCityAirport(); }
 // kalkış: işin çıkış yerinden kalkınca kargo yüklenir
-function jobOnDepart(fromKey){ const j=S.me.job; if(j && !j.loaded && j.from===fromKey && S.me.plane && S.me.plane.model==='b777') j.loaded=true; return j&&j.loaded ? j.ton*1000 : 0; }
+function jobOnDepart(fromKey){ const j=S.me.job, pl=S.me.plane, CP=pl&&CARGO_PROF[pl.model]; if(j && !j.loaded && j.from===fromKey && CP && CP.tmax>=j.ton){ j.loaded=true; j.pid=pl.id; } return (j&&j.loaded&&pl&&j.pid===pl.id) ? j.ton*1000 : 0; }
 // iniş: hedefe inince ödeme; kazada kargo kaybolur
 function jobOnArrive(at, outcome){
-  const me=S.me, j=me.job; if(!j || !j.loaded) return '';
+  const me=S.me, j=me.job; if(!j || !j.loaded || (j.pid && me.plane && j.pid!==me.plane.id)) return '';
   if(outcome==='crash'){ me.job=null; return '📦 Kargo kaza sırasında kayboldu, iş iptal'; }
   if(at===j.to){ me.money+=j.pay; me.job=null; me.cargoDone=(me.cargoDone||0)+1; return '📦 Kargo teslim edildi! +💰'+fmtMoney(j.pay); }
   return '';
@@ -2921,6 +2946,7 @@ const PHYS = {
   c150:    {mass:700,  S:15,   Tmax:2850,  vprop:85,  cd0:0.034, k:0.055, cl0:0.25, clmax:1.45, roll:1.35, pitch:0.55, stab:2.0, hg:1.2, vr:28, span:10.2, len:7.5, burnIdle:0.25},
   c172:    {mass:1000, S:16.2, Tmax:3600,  vprop:95,  cd0:0.031, k:0.050, cl0:0.25, clmax:1.50, roll:1.25, pitch:0.50, stab:2.0, hg:1.3, vr:30, span:11.0, len:8.2, burnIdle:0.25},
   kingair: {mass:5000, S:28,   Tmax:16000, vprop:250, cd0:0.026, k:0.045, cl0:0.22, clmax:1.60, roll:0.95, pitch:0.40, stab:1.8, hg:1.75, vr:44, span:16.6, len:13.4, burnIdle:0.3, flapDrag:2.0, idleDrag:0.28},
+  atr72:   {mass:17000, S:61,  Tmax:72000, vprop:230, cd0:0.027, k:0.040, cl0:0.30, clmax:2.30, roll:0.85, pitch:0.38, stab:1.8, hg:2.15, vr:55, span:27.05, len:27.17, burnIdle:0.3, flapDrag:2.0, idleDrag:0.28},
   b777:    {mass:150000, S:430, Tmax:820000, vprop:380, cd0:0.022, k:0.045, cl0:0.25, clmax:1.90, roll:0.85, pitch:0.38, stab:1.6, hg:5.2, vr:68, span:64.8, len:63.7, burnIdle:0.3, jet:true, flapDrag:1.7, idleDrag:0.07},
 };
 const KT = 1.94384, FT = 3.28084, FPM = 196.85, D2R = Math.PI/180, GRAV = 9.81, RHO = 1.225;
@@ -3209,6 +3235,37 @@ function buildPlane(R,model,colorHex){
     b.box(0,7.2,27.2,0.6,9.5,6,c); b.box(0,10.5,29.2,0.62,3,3.5,bl);   // dikey kuyruk
     b.box(0,-4.4,-24,0.4,2.8,0.4,gr); b.box(0,-5.6,-24,0.8,0.9,1.6,dk); // burun takımı
     hinge=[-1.3,5.6]; props=[]; span=64.8;
+  } else if(model==='atr72'){
+    // ATR 72-600F — gerçek ölçüler: boy 27.17 m, kanat 27.05 m, gövde çapı ~2.6 m, yüksek kanat, T-kuyruk,
+    // 2× PW127M turboprop (pervane merkezi gövde ekseninden 4.05 m), 6 palli pervane (çap 3.93 m), gövde yanında iniş takımı kaportaları
+    const wt=hexRGB('#f6f6f4'), lg=hexRGB('#d9dce0');
+    b.box(0,0,-1.3,2.62,2.6,18.6,wt);                                       // ana gövde
+    b.box(0,-0.05,-11.2,2.45,2.4,1.2,wt); b.box(0,-0.15,-12.2,2.05,1.95,0.9,wt); b.box(0,-0.3,-13.0,1.45,1.3,0.75,wt); b.box(0,-0.4,-13.55,0.8,0.7,0.4,lg); // burun
+    b.box(0,0.62,-10.95,2.47,0.42,1.2,gl_); b.box(0,0.5,-11.75,2.0,0.38,0.5,gl_);   // kokpit camları
+    b.box(0,0.15,9.0,2.45,2.35,2.0,wt); b.box(0,0.42,11.0,1.95,1.8,2.0,wt); b.box(0,0.68,12.7,1.35,1.2,1.5,wt); b.box(0,0.88,13.6,0.7,0.6,0.6,lg); // yukarı kalkık kuyruk konisi
+    b.box(0,-0.15,-1.3,2.64,0.22,18.6,c);                                   // gövde şeridi
+    b.box(0,-1.25,-1.3,2.4,0.25,17,lg);                                     // karın
+    b.box(0,1.45,-0.3,2.2,0.42,3.4,wt);                                     // kanat-gövde kaportası
+    for(const sd of [-1,1]){
+      b.box(sd*1.48,-0.85,0.6,0.75,1.15,4.2,wt);                           // iniş takımı kaportası (sponson)
+      b.box(sd*1.5,-1.75,0.15,0.32,0.8,0.8,dk); b.box(sd*1.5,-1.75,1.05,0.32,0.8,0.8,dk); // ana tekerlekler
+      // kanat: kök veteri 2.57 m, uçlara doğru daralır, hafif dihedral
+      const seg=(x0,x1,ch,y)=>b.box(sd*(x0+x1)/2,y,-0.35,x1-x0,0.34,ch,wt);
+      seg(1.1,3.4,2.57,1.55); seg(4.7,9.0,2.25,1.58); seg(9.0,12.0,1.85,1.62); seg(12.0,13.5,1.5,1.65);
+      b.box(sd*4.05,1.55,-0.35,1.3,0.34,2.57,wt);
+      b.box(sd*13.45,1.65,-0.35,0.15,0.36,1.5,c);                          // kanat ucu
+      for(const [x0,x1] of [[1.2,3.35],[4.8,8.8]]) fl.box(sd*(x0+x1)/2,0,0.32,x1-x0-0.05,0.14,0.62,lg);
+      // motor kaportası (PW127M): kanadın altında, önde dar hava girişi
+      b.box(sd*4.05,1.0,-1.5,1.0,1.2,4.4,wt); b.box(sd*4.05,0.78,-3.95,0.9,0.95,0.6,wt); b.box(sd*4.05,0.55,-4.0,0.5,0.32,0.5,dk);
+      b.box(sd*4.05,1.12,1.25,0.7,0.8,1.3,wt); b.box(sd*4.05,1.12,2.0,0.45,0.5,0.4,dk);  // arka kaporta + egzoz
+      b.box(sd*4.05,0.95,-4.45,0.42,0.42,0.42,c);                          // pervane göbeği (spinner)
+    }
+    b.box(0,1.5,7.6,0.32,0.55,3.2,wt);                                      // sırt kanatçığı
+    b.box(0,1.95,10.4,0.32,1.3,3.6,c); b.box(0,3.15,11.3,0.3,1.2,3.1,c); b.box(0,4.3,12.1,0.28,1.15,2.7,c); b.box(0,5.3,12.8,0.26,0.95,2.3,c); // ok açılı dikey kuyruk
+    b.box(0,5.82,13.25,7.35,0.18,1.7,wt); b.box(0,5.82,14.1,7.0,0.12,0.4,lg);   // T-kuyruk (yatay stabilize + irtifa dümeni)
+    b.box(0,-1.55,-10.2,0.12,0.7,0.12,gr); b.box(0,-1.88,-10.2,0.26,0.56,0.56,dk); // burun tekerleği
+    hinge=[1.38,0.93]; props=[[-4.05,0.95,-4.7],[4.05,0.95,-4.7]]; span=27.05;
+    for(let i=0;i<6;i++){ const a=i*Math.PI/3; for(let j=1;j<=5;j++){ const r=j*0.38; p.box(Math.cos(a)*r,Math.sin(a)*r,0,0.22,0.22,0.05,dk); } }   // 6 palli pervane
   } else if(model==='kingair'){
     b.box(0,0.3,-0.6,1.7,1.9,8.6,wh); b.box(0,0.1,-5.4,1.3,1.4,1.6,wh); b.box(0,0.0,-6.4,0.8,0.8,0.8,wh);
     b.box(0,0.9,-4.4,1.5,0.55,0.9,gl_); b.box(0,0.65,-1.2,1.72,0.4,5.5,gl_);
@@ -3252,7 +3309,7 @@ function buildPlane(R,model,colorHex){
 function makeAudio(model, ctxOverride){
   try{
     const ac=ctxOverride || new (window.AudioContext||window.webkitAudioContext)();
-    const sr=ac.sampleRate, turbo = model==='kingair' || model==='b777';
+    const sr=ac.sampleRate, turbo = model==='kingair' || model==='b777' || model==='atr72';
     const VOL=0.7;
     const master=ac.createGain(); master.gain.value=FLSET.sound?VOL:0;
     const comp=ac.createDynamicsCompressor(); comp.threshold.value=-18; comp.ratio.value=4;
@@ -3533,7 +3590,7 @@ function startFlight(opts){
     if(!R){ el.classList.remove('on'); resolve({outcome:'aborted', error:'3D desteklenmiyor', fuelLeft:opts.fuelL, damage:{}}); return; }
     const gl=R.gl;
     const P={...PHYS[opts.model]};
-    if(opts.extraMass>0){ const m0=P.mass; P.mass+=opts.extraMass; P.vr*=Math.sqrt(P.mass/m0); }
+    if(opts.extraMass>0){ const m0=P.mass; P.mass+=opts.extraMass; P.vr*=Math.sqrt(P.mass/m0); P.Tmax*=P.mass/m0; }   // yüklüyken motor daha çok güç verir (kalkış mesafesi makul kalsın)
     const seed=(opts.seed|0)||7;
     // pistler: kalkış (0,0) kuzeye; varış SIM_D kuzeyde, yan kayma ve açı rastgele
     const rnd=k=>fhash(seed,k,99);
@@ -3898,7 +3955,7 @@ function startFlight(opts){
     function resize(){ DPR=Math.min(devicePixelRatio||1, coarse?1.5:2); VW=innerWidth; VH=innerHeight; glc.width=VW*DPR; glc.height=VH*DPR; hc.width=VW*DPR; hc.height=VH*DPR; }
     resize(); addEventListener('resize',resize);
     let camDt=0.016;
-    const pitMode=()=> st.cam==='cockpit' && PIT.ok && opts.model!=='kingair' && opts.model!=='b777';
+    const pitMode=()=> st.cam==='cockpit' && PIT.ok && (opts.model==='c150'||opts.model==='c172');
     let pitKey='';
     let satT=null; preloadSat();
     function render(){
@@ -3918,7 +3975,7 @@ function startFlight(opts){
         const camG=W.heightAt(cp[0],cp[2])+1.5; if(cp[1]<camG) cp[1]=camG;
         eye=vadd(cp,sh); tgt=vadd(vadd(st.pos,vscl(hf,P.len*1.2)),[0,1.2,0]);
       } else {
-        const ek = opts.model==='b777'?[0,1.4,-30.2]:opts.model==='kingair'?[0,1.05,-4.3]:(opts.model==='c172'?[0,0.82,-1.6]:[0,0.78,-1.5]);
+        const ek = opts.model==='atr72'?[0,0.95,-10.7]:opts.model==='b777'?[0,1.4,-30.2]:opts.model==='kingair'?[0,1.05,-4.3]:(opts.model==='c172'?[0,0.82,-1.6]:[0,0.78,-1.5]);
         let fl=[0,-0.08,-1]; fov=72;
         if(pitMode()){ fov=52; const Lp=pitLayout(VW,VH), hF=(Lp.top+PIT.hy*Lp.s)/VH; fl=[0,(hF-0.5)*2*Math.tan(fov/2*D2R),-1]; }
         eye=vadd(vadd(st.pos,m4xv(Rm,ek)),sh); const fv=m4xv(Rm,fl); tgt=vadd(eye,fv); cup=up; near=0.3;
@@ -3968,7 +4025,7 @@ function startFlight(opts){
         c.fillStyle=g; c.beginPath(); c.moveTo(0,VH); c.lineTo(0,VH-ph*0.8); c.quadraticCurveTo(VW/2,VH-ph*1.25,VW,VH-ph*0.8); c.lineTo(VW,VH); c.fill();
         c.fillStyle='#3a3f46'; c.beginPath(); c.moveTo(0,0); c.lineTo(VW*0.07,0); c.lineTo(VW*0.02,VH*0.8); c.lineTo(0,VH*0.8); c.fill();
         c.beginPath(); c.moveTo(VW,0); c.lineTo(VW*0.93,0); c.lineTo(VW*0.98,VH*0.8); c.lineTo(VW,VH*0.8); c.fill();
-        if(opts.model!=='kingair' && opts.model!=='b777'){ c.fillStyle='#d9d6cc'; c.fillRect(0,0,VW,VH*0.035); }
+        if(opts.model==='c150'||opts.model==='c172'){ c.fillStyle='#d9d6cc'; c.fillRect(0,0,VW,VH*0.035); }
       }
       const V=vlen(st.vel), ktV=Math.round(vlen(vsub(st.vel,windV))*KT);
       const gh=W.heightAt(st.pos[0],st.pos[2]);
