@@ -572,9 +572,9 @@ function renderHUD(){
     const n=me.seeds[id]||0;
     const d=document.createElement('div');
     d.className='slot'+(S.sel===id?' sel':'')+(n?'':' empty');
-    d.innerHTML=`${CROPS[id].em}<small>${n}</small>`;
+    d.innerHTML=`${CROPS[id].em}<small>🌱${n}</small>`;
     d.title=CROPS[id].ad+' tohumu';
-    d.onclick=()=>{ S.sel=id; renderHUD(); toast(CROPS[id].ad+' seçildi'); };
+    d.onclick=()=>{ S.sel=id; renderHUD(); toast(CROPS[id].ad+' tohumu seçildi'); };
     hb.appendChild(d);
   }
   if((me.items.gubre||0)>0){
@@ -684,7 +684,7 @@ function openShop(tab){
     else h+=`<button class="btn primary" style="width:100%;margin-top:8px" data-sell="*">Hepsini sat</button><p class="muted">💡 Şehirlerde ürünler daha pahalıya satılır — uçağın varsa oraya götür!</p>`;
   } else if(shopTab==='tohum'){
     for(const id of CROP_IDS){ const c=CROPS[id]; const ok=unlocked(id);
-      h+=`<div class="row"><span class="em">${c.em}</span><div class="grow"><b>${c.ad}</b> <span class="muted">(${me.seeds[id]||0} adet)</span><div class="muted">${ok?`Büyüme ${fmtTime(c.sure)} · satış 💰${c.fiyat}`:`🔒 ${c.kilit} parsel tarla gerekir`}</div></div>
+      h+=`<div class="row"><span class="em">${c.em}</span><div class="grow"><b>${c.ad} tohumu</b> <span class="muted">(${me.seeds[id]||0} adet)</span><div class="muted">${ok?`Büyüme ${fmtTime(c.sure)} · satış 💰${c.fiyat}`:`🔒 ${c.kilit} parsel tarla gerekir`}</div></div>
       ${ok?`<button class="btn" data-buy="${id}" data-n="1">💰${c.tohum}</button><button class="btn" data-buy="${id}" data-n="5">×5</button>`:''}</div>`; }
     h+=`<p class="muted" style="margin:10px 0 0">Malzeme:</p>`;
     for(const [id,pr] of Object.entries(ITEM_BUY.koy)){ const I=ITEMS[id];
@@ -1994,7 +1994,7 @@ function openDepo(n){
   let any=false;
   for(const id of Object.keys(reg)){
     const nb=bag[id]||0, nd=box[id]||0; if(!nb && !nd) continue; any=true;
-    h+=`<div class="row" style="flex-wrap:wrap"><span class="em">${reg[id].em}</span><div class="grow" style="min-width:110px"><b>${reg[id].ad}</b><div class="muted">çantada ${nb} · depoda ${nd}</div></div>
+    h+=`<div class="row" style="flex-wrap:wrap"><span class="em">${reg[id].em}</span><div class="grow" style="min-width:110px"><b>${reg[id].ad}${depoTab==='seeds'?' tohumu':''}</b><div class="muted">çantada ${nb} · depoda ${nd}</div></div>
       <span style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn" style="height:36px;font-size:13px" data-dp="put" data-k="${depoTab}" data-id="${id}" data-n="10" ${nb?'':'disabled'}>Koy 10</button>
         <button class="btn" style="height:36px;font-size:13px" data-dp="put" data-k="${depoTab}" data-id="${id}" data-n="all" ${nb?'':'disabled'}>Hepsi →</button>
@@ -2330,7 +2330,7 @@ function openTrade(){
     const reg=TREG[tradeTab](), bag=tradeBag(tradeTab); let any=false;
     for(const id of Object.keys(reg)){
       const have=bag[id]||0, put=(mine[tradeTab]||{})[id]||0; if(!have) continue; any=true;
-      h+=`<div class="row"><span class="em">${reg[id].em}</span><div class="grow"><b>${reg[id].ad}</b><div class="muted">sende ${have}${put?' · teklifte '+put:''}</div></div>
+      h+=`<div class="row"><span class="em">${reg[id].em}</span><div class="grow"><b>${reg[id].ad}${tradeTab==='s'?' tohumu':''}</b><div class="muted">sende ${have}${put?' · teklifte '+put:''}</div></div>
         <button class="btn" ${sb} data-tadd="${tradeTab}" data-id="${id}" data-n="1" ${put<have?'':'disabled'}>+1</button><button class="btn" ${sb} data-tadd="${tradeTab}" data-id="${id}" data-n="10" ${put<have?'':'disabled'}>+10</button><button class="btn" ${sb} data-tadd="${tradeTab}" data-id="${id}" data-n="all" ${put<have?'':'disabled'}>Hepsi</button></div>`;
     }
     if(!any) h+=`<p class="muted">${M.id!=='koy'&&tradeTab!=='s'?'Uçağında/bavulunda':'Çantanda'} bu türden bir şey yok.</p>`;
