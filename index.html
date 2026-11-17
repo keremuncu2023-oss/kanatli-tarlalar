@@ -433,7 +433,8 @@ function loadMe(d){
     ps.forEach((p,i)=>{ if(!p.id) p.id=i+1; if(!p.at) p.at='koy'; });
     me.planes=ps; me.pi=d.pi||0; fleetify(me); }
   me.animals={...(d.animals||{})}; me.anT={...(d.anT||{})}; me.barn=d.barn||1; me.rod=d.rod||1; me.vehicles=objVals(d.vehicles).map(v=>({...v,r:0})); me.loan=d.loan||null;
-  if(me.trip && me.trip.cargo){ me.trip.cargo = {crops:{...(me.trip.cargo.crops||{})}, items:{...(me.trip.cargo.items||{})}}; }
+  // Firebase boş nesneleri saklamaz: şehirdeyken boş yük {crops:{},items:{}} kayboluyordu → her zaman yeniden kur
+  if(me.trip){ const c=me.trip.cargo||{}; me.trip={...me.trip, cargo:{crops:{...(c.crops||{})}, items:{...(c.items||{})}, bought:{...(c.bought||{})}}}; }
   delete me.lot; delete me.w; delete me.h; delete me.plots; delete me.ek;
   return me;
 }
@@ -833,6 +834,8 @@ $('pBody').addEventListener('click',e=>{
   if(d.cseed){ const id=d.cseed, n=+d.n, cost=seedPrice(id,M.id)*n; if(me.money<cost){ toast('Paran yetmiyor'); return; } me.money-=cost; me.seeds[id]=(me.seeds[id]||0)+n; S.sel=id; saveSoon(); openCityMarket(); return; }
   if(d.csell){ citySell(d.csell, d.n); return; }
   if(d.cbuy){ cityBuy(d.cbuy, +d.n); return; }
+  if(d.cref){ cargoRefund(d.cref, +d.n); return; }
+  if(d.cdump){ cargoDump(d.cdump, +d.n); return; }
   if(d.crefuel!==undefined){ refuel(true); return; }
   if(d.crepair!==undefined){ repairPlane('engine', true); return; }
   if(d.flyhome!==undefined){ depart('koy'); return; }
@@ -1038,14 +1041,17 @@ function enterCity(){
 function openCityMarket(){
   const me=S.me, C=CITIES[M.id], cg=me.trip.cargo, used=cargoCount(cg), PD={kap:tripCap()};
   let h=`<p class="muted" style="margin:0 0 6px">Paran: <b>💰 ${fmtMoney(me.money)}</b> · ${me.trip.pax?'Bavul (malzeme)':'Malzeme yükü'}: <b>${used}/${PD.kap}</b></p>`;
-  h+=`<div class="tabs"><button class="btn tab ${cityTab==='sat'?'on':''}" data-ctab="sat">Sat</button><button class="btn tab ${cityTab==='al'?'on':''}" data-ctab="al">Al</button><button class="btn tab ${cityTab==='arazi'?'on':''}" data-ctab="arazi">Arazi</button><button class="btn tab ${cityTab==='alet'?'on':''}" data-ctab="alet">Aletler</button></div>`;
+  h+=`<div class="tabs"><button class="btn tab ${cityTab==='sat'?'on':''}" data-ctab="sat">Sat</button><button class="btn tab ${cityTab==='al'?'on':''}" data-ctab="al">Al</button><button class="btn tab ${cityTab==='arazi'?'on':''}" data-ctab="arazi">Arazi</button><button class="btn tab ${cityTab==='alet'?'on':''}" data-ctab="alet">Aletler</button><button class="btn tab ${cityTab==='yuk'?'on':''}" data-ctab="yuk">Yük</button></div>`;
   if(cityTab==='sat'){
     h+=`<p class="muted" style="margin:0">Fiyatların hepsi için 📈 Piyasa'ya bak.</p>`;
     let any=false;
     for(const id of GOOD_IDS){ const n=cg.crops[id]||0; if(!n) continue; any=true; const p=sellPrice(id,M.id);
       h+=`<div class="row"><span class="em">${GOODS[id].em}</span><div class="grow"><b>${GOODS[id].ad}</b> ×${n}<div class="muted">tanesi 💰${p} (köyde ${sellPrice(id)})</div></div>${sellBtns('csell',id,n,p)}</div>`; }
     if(!any) h+='<p>Uçakta satılacak ürün yok. Köyden ürün getir ya da buradaki tarlanda yetiştir.</p>';
+  } else if(cityTab==='yuk'){
+    h+=cargoManageHTML();
   } else if(cityTab==='al'){
+    if(cargoCount(cg)) h+=`<p class="muted" style="margin:0 0 6px">Yanlış mı aldın? <b>📦 Yük</b> sekmesinden uçaktaki malzemeleri görüp iade edebilirsin.</p>`;
     for(const [id,price] of Object.entries(ITEM_BUY[M.id])){ const I=ITEMS[id];
       h+=`<div class="row"><span class="em">${I.em}</span><div class="grow"><b>${I.ad}</b> <span class="muted">(uçakta ${cg.items[id]||0}, evde ${me.items[id]||0})</span><div class="muted">${I.acik}</div></div><button class="btn" data-cbuy="${id}" data-n="1">💰${price}</button><button class="btn" data-cbuy="${id}" data-n="5">×5</button></div>`; }
     h+=`<p class="muted" style="margin:8px 0 0">Tohumlar:</p>`;
@@ -1098,7 +1104,37 @@ function cityBuy(id,n){
   const space=tripCap()-cargoCount(cg); n=Math.min(n,space);
   if(n<=0){ toast('Yer kalmadı!'); return; }
   const cost=ITEM_BUY[M.id][id]*n; if(me.money<cost){ toast('Paran yetmiyor'); return; }
-  me.money-=cost; cg.items[id]=(cg.items[id]||0)+n; saveSoon(); openCityMarket();
+  me.money-=cost; cg.items[id]=(cg.items[id]||0)+n;
+  cg.bought=cg.bought||{}; const bl=cg.bought[id]; cg.bought[id] = (bl && bl.at===M.id) ? {at:M.id, n:bl.n+n, p:ITEM_BUY[M.id][id]} : {at:M.id, n, p:ITEM_BUY[M.id][id]};
+  saveSoon(); openCityMarket();
+}
+// uçaktaki malzemeler: burada alınanlar aynı fiyattan iade; başka yerden gelenler yarı fiyatına satılır
+const itemAvgPrice = id => { const ps=Object.values(ITEM_BUY).map(c=>c[id]).filter(Boolean); return ps.length?ps.reduce((a,b)=>a+b,0)/ps.length:20; };
+function cargoRefundable(id){ const cg=S.me.trip.cargo, b=cg.bought&&cg.bought[id]; return (b && b.at===M.id) ? {n:Math.min(b.n, cg.items[id]||0), p:b.p} : {n:0, p:0}; }
+function cargoManageHTML(){
+  const me=S.me, cg=me.trip.cargo, ids=Object.keys(cg.items||{}).filter(k=>cg.items[k]>0);
+  let h=`<p class="muted" style="margin:0 0 6px">Uçaktaki malzeme yükü: <b>${cargoCount(cg)}/${tripCap()}</b>. Mahsuller yer kaplamaz, onlar <b>Sat</b> sekmesinde.</p>`;
+  if(!ids.length) return h+'<p>Uçakta malzeme yok.</p>';
+  const sb='style="height:38px;font-size:13px;padding:0 8px;margin-left:4px"';
+  for(const id of ids){
+    const I=ITEMS[id], n=cg.items[id], r=cargoRefundable(id), half=Math.max(1,Math.round(itemAvgPrice(id)*0.5));
+    h+=`<div class="row"><span class="em">${I.em}</span><div class="grow"><b>${I.ad}</b> ×${n}<div class="muted">${r.n?`${r.n} tanesi burada alındı → tam iade 💰${r.p}`:''}${r.n&&n>r.n?' · ':''}${n>r.n?`${n-r.n} tanesi başka yerden → yarı fiyat 💰${half}`:''}</div></div><div style="display:flex;flex-wrap:wrap;justify-content:flex-end">`;
+    if(r.n) h+=`<button class="btn" ${sb} data-cref="${id}" data-n="1">İade 1</button><button class="btn primary" ${sb} data-cref="${id}" data-n="${r.n}">İade ${r.n} · 💰${fmtMoney(r.n*r.p)}</button>`;
+    if(n>r.n) h+=`<button class="btn" ${sb} data-cdump="${id}" data-n="1">Sat 1</button><button class="btn" ${sb} data-cdump="${id}" data-n="${n-r.n}">Sat ${n-r.n} · 💰${fmtMoney((n-r.n)*half)}</button>`;
+    h+='</div></div>';
+  }
+  return h;
+}
+function cargoRefund(id,n){
+  const me=S.me, cg=me.trip.cargo, r=cargoRefundable(id); n=Math.min(n,r.n); if(n<=0) return;
+  cg.items[id]-=n; if(!cg.items[id]) delete cg.items[id]; cg.bought[id].n-=n; me.money+=n*r.p;
+  saveSoon(); renderHUD(); toast('↩️ '+n+' '+ITEMS[id].ad+' iade edildi: +💰'+fmtMoney(n*r.p)); openCityMarket();
+}
+function cargoDump(id,n){
+  const me=S.me, cg=me.trip.cargo, r=cargoRefundable(id), free=(cg.items[id]||0)-r.n; n=Math.min(n,free); if(n<=0) return;
+  const half=Math.max(1,Math.round(itemAvgPrice(id)*0.5));
+  cg.items[id]-=n; if(!cg.items[id]) delete cg.items[id]; me.money+=n*half;
+  saveSoon(); renderHUD(); toast(n+' '+ITEMS[id].ad+' satıldı: +💰'+fmtMoney(n*half)); openCityMarket();
 }
 
 function openBoard(){
@@ -2126,7 +2162,7 @@ async function startPaxFlight(pilotUid, f){
 }
 
 /* ---------------- Tarla deposu (sandık) ---------------- */
-const DEPO_CAP=300;
+const DEPO_CAP=Infinity;   // tarla depoları sınırsız
 const chestPos = n => { const p=lotPos(n); return {x:p.x+12.5, y:p.y+1.7}; };
 function drawChest(n,time,mine){
   const c=chestPos(n), x=c.x*T, y=c.y*T;
@@ -2150,7 +2186,7 @@ function openDepo(n){
   const inCity = M.id!=='koy' && S.me.trip && S.me.trip.cargo;
   const tabs=[['seeds','🌱 Tohum'],['crops','🧺 Ürün'],['items','🧰 Eşya']];
   let h=`<div class="tabs">${tabs.map(([k,l])=>`<button class="btn tab ${depoTab===k?'on':''}" data-dtab="${k}" style="font-size:14px">${l}</button>`).join('')}</div>`;
-  h+=`<p class="muted" style="margin:0 0 6px">Depo: <b>${depoCount(d)}/${DEPO_CAP}</b>${inCity&&depoTab!=='seeds'?` · ${S.me.trip.pax?'Bavul':'Uçak'}: <b>${cargoCount(S.me.trip.cargo)}/${tripCap()}</b>`:''} · Sadece sen açabilirsin.</p>`;
+  h+=`<p class="muted" style="margin:0 0 6px">Depoda <b>${depoCount(d)}</b> şey var (sınırsız)${inCity&&depoTab!=='seeds'?` · ${S.me.trip.pax?'Bavul':'Uçak'}: <b>${cargoCount(S.me.trip.cargo)}/${tripCap()}</b>`:''} · Sadece sen açabilirsin.</p>`;
   const reg = depoTab==='seeds'?CROPS : (depoTab==='crops'?GOODS:ITEMS);
   const bag=bagRef(depoTab), box=d[depoTab];
   let any=false;
@@ -2737,7 +2773,7 @@ function drawMachines(n, f, mine, time){
 }
 
 /* sürüm etiketi — hangi sürümün yüklü olduğunu görmek için */
-(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 17.11 20:38'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
+(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 17.11 21:43'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
 
 /* ---------- Araçlarım: üst menüden araçları yanına ışınla ---------- */
 (()=>{
