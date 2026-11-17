@@ -496,18 +496,20 @@ async function enterOnline(user){
     for(const id in S.players){ if(id!==S.uid && !all[id]) delete S.players[id]; }
     if($('panel').dataset.kind==='board') openBoard();
   });
-  const pres = FB.ref(FB.db,'presence');
+  const pres = FB.ref(FB.db,'presence'); const presT0=performance.now();
   const upd = s=>{
     if(s.key===S.uid) return;
     const v=s.val(); if(!v) return;
     let o=S.others.get(s.key);
-    if(!o){ o={x:v.x,y:v.y,msgShown:0}; S.others.set(s.key,o); if(v.mt && Date.now()-v.mt>8000) o.msgShown=v.mt; }
+    if(!o){ o={x:v.x,y:v.y,msgShown:0}; S.others.set(s.key,o); if(v.mt && Date.now()-v.mt>8000) o.msgShown=v.mt; if(performance.now()-presT0>4000) addSysLog('➡️ '+(v.n||'?')+' oyuna katıldı'); }
     o.tx=v.x; o.ty=v.y; o.name=v.n; o.color=v.c; o.dir=v.d; o.moving=!!v.m; o.t=v.t; o.st=v.st||''; o.mp=v.mp||'koy'; o.rv=v.rv||'';
     if(v.mt && v.mt!==o.msgShown){ o.msg=v.msg; o.msgShown=v.mt; o.msgLocal=performance.now(); addChatLog(v.n, v.msg); }
   };
   FB.onChildAdded(pres, upd);
   FB.onChildChanged(pres, upd);
-  FB.onChildRemoved(pres, s=>S.others.delete(s.key));
+  FB.onChildRemoved(pres, s=>{ const o=S.others.get(s.key); if(o && o.name) addSysLog('⬅️ '+o.name+' oyundan ayrıldı'); S.lastSeen=S.lastSeen||{}; S.lastSeen[s.key]=Date.now(); S.others.delete(s.key); });
+  // son görülme: oyundayken dakikada bir kaydet
+  const beat=()=>{ if(S.online && S.uid) FB.update(FB.ref(FB.db,'players/'+S.uid),{seen:FB.serverTimestamp()}).catch(()=>{}); }; beat(); setInterval(beat,60000);
   extrasOnline();
   const myPres = FB.ref(FB.db,'presence/'+S.uid);
   FB.onDisconnect(myPres).remove();
@@ -1151,6 +1153,12 @@ function openBoard(){
 }
 
 /* ---------------- Sohbet ---------------- */
+function addSysLog(txt){
+  const log=$('chatLog'); const d=document.createElement('div');
+  d.innerHTML='<span style="color:#7cc4ff;font-weight:700">'+esc(txt)+'</span>'; log.appendChild(d);
+  while(log.children.length>5) log.firstChild.remove();
+  setTimeout(()=>d.remove(),12000);
+}
 function addChatLog(name,msg){
   if(!msg) return;
   const log=$('chatLog'); const d=document.createElement('div');
@@ -1589,11 +1597,9 @@ function drawApron(){
     }
   }
   here.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:(a[2].id||0)-(b[2].id||0));
-  const used={};
+  // herkesin uçakları aynı sırayla, ayrı park yerlerine (kimse kimsenin üstüne çizilmez)
   here.forEach(([id,p,pl],i)=>{
-    let sp;
-    if(M.id==='koy'){ const f=farmsOf(p).find(f=>!isCityFarm(f)); const k=used[id]=(used[id]||0)+1; sp=parkSpot((f?f.lot:i)+(k-1)*7); }
-    else sp=parkSpot(i);
+    const n=M.parks.length, base=M.parks[i%n], row=Math.floor(i/n), sp={x:base.x, y:base.y+row*(M.parks[n-1].y-M.parks[0].y+2)};
     drawPlane2D(sp.x*T, sp.y*T, pl.model, (id===S.uid?S.color:p.color)||'#999');
     if(id===S.uid) label('senin', sp.x*T, sp.y*T-24, 11, '#ffe27a');
   });
@@ -2591,6 +2597,12 @@ $('pBody').addEventListener('click',e=>{
 Object.assign(window.__game,{openPlayerMenu, openNotes, worldTap:(...a)=>worldTap(...a), get Z(){return Z;}, get camX(){return camX;}, get camY(){return camY;}});
 
 /* ---------------- Sosyal: kim nerede ---------------- */
+// aynı gün → sadece saat; farklı gün → tarih + saat
+function fmtSeen(t){
+  const d=new Date(t), n=new Date(), p=x=>String(x).padStart(2,'0'), hm=p(d.getHours())+':'+p(d.getMinutes());
+  if(d.toDateString()===n.toDateString()) return hm;
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+(d.getFullYear()!==n.getFullYear()?'.'+d.getFullYear():'')+' '+hm;
+}
 function openSocial(){
   const rows=[];
   const meLoc = S.mode==='flight' ? (S.status||'✈️ Uçuşta') : '📍 '+(LOC_AD[M.id]||M.id);
@@ -2606,6 +2618,17 @@ function openSocial(){
     const p=S.players[r.id]||{}, plots=r.me?plotCount(S.me):plotCount(p), pl=r.me?S.me.plane:p.plane;
     h+=`<div class="row"><span class="sw" style="width:22px;height:22px;border-width:2px;background:${esc(r.color)}"></span><div class="grow" style="min-width:0"><b>${esc(r.name)}</b> <span class="muted">· 🟫${plots}${pl&&PLANES[pl.model]?' · '+PLANES[pl.model].em+' '+PLANES[pl.model].ad:''}</span><div style="font-size:14px">${esc(r.loc)}</div></div>`+
       (!r.me && r.near && S.online ? `<button class="btn" style="font-size:13px;height:38px" data-tstart="${esc(r.id)}">🤝 Takas</button>` : (!r.me && r.same ? '<span class="muted" style="font-size:12px">aynı haritada</span>' : ''))+`</div>`;
+  }
+  // çevrimdışı oyuncular: son görülme
+  const onIds=new Set(rows.map(r=>r.id));
+  const off=Object.entries(S.players||{}).filter(([id,p])=>p && p.name && !onIds.has(id) && id!==S.uid)
+    .map(([id,p])=>[id,p,Math.max(p.seen||0,p.updated||0,(S.lastSeen||{})[id]||0)]).sort((a,b)=>b[2]-a[2]).slice(0,40);
+  if(off.length){
+    h+=`<p style="margin:12px 0 4px"><b>⚪ Çevrimdışı</b> <span class="muted">(${off.length})</span></p>`;
+    for(const [id,p,t] of off){
+      const pl=p.plane;
+      h+=`<div class="row" style="opacity:.75"><span class="sw" style="width:22px;height:22px;border-width:2px;background:${esc(p.color||'#999')}"></span><div class="grow" style="min-width:0"><b>${esc(p.name)}</b> <span class="muted">· 🟫${plotCount(p)}${pl&&PLANES[pl.model]?' · '+PLANES[pl.model].em:''}</span><div class="muted" style="font-size:13px">son görülme: ${t?fmtSeen(t):'bilinmiyor'}</div></div></div>`;
+    }
   }
   if(!S.online) h+='<p class="muted">Test modu: tek kişilik.</p>';
   openPanel('social','👥 Sosyal — kim nerede',h);
@@ -2773,7 +2796,7 @@ function drawMachines(n, f, mine, time){
 }
 
 /* sürüm etiketi — hangi sürümün yüklü olduğunu görmek için */
-(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 17.11 21:43'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
+(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 17.11 22:59'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
 
 /* ---------- Araçlarım: üst menüden araçları yanına ışınla ---------- */
 (()=>{
@@ -3013,7 +3036,7 @@ function buildWorld(R,seed,o,d,coastal){
     const fRw = ss(900,2700,dr);
     const dRoute = Math.min(segDist(x,z,o.x,o.z,appS[0],appS[2]), segDist(x,z,appS[0],appS[2],d.x,d.z));
     h = h*fRw*(0.25+0.75*ss(350,1900,dRoute));
-    if(coastal){ const cx = coastX + Math.sin(z/1700)*500 + Math.sin(z/530)*120; const t=x-cx; if(t>0) h = Math.min(h*(1-ss(0,500,t)), -t*0.04); else h=Math.max(h,0.8); }
+    if(coastal){ const cx = coastX + Math.sin(z/1700)*500 + Math.sin(z/530)*120; const t=x-cx; if(t>0) h = Math.min(h*(1-ss(0,500,t)), -t*0.04); else h=Math.max(h,0.8*fRw); }   // pist çevresi (fRw→0) düz kalmalı, yoksa arazi pistin üstüne çıkar
     return h;
   };
   const H=new Float32Array((NX+1)*(NZ+1));
