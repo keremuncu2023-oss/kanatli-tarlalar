@@ -3190,7 +3190,8 @@ function startFlight(opts){
     if(SPEC && opts.feed){ unfeed = opts.feed(v=>{ if(v.s && (!snaps.length || snaps[snaps.length-1].k!==v.s.k)){ snaps.push({...v.s, rt:performance.now()}); if(snaps.length>40) snaps.shift(); lastSnapAt=performance.now(); } if(v.end && !specEnd) specEnd=v.end; }); }
     let lastB=0, bk=0;
     const AU = makeAudio(opts.model);
-    if(SPEC){ const res=()=>{ try{ if(AU && AU.ac.state==='suspended') AU.ac.resume().catch(()=>{}); }catch(e){} }; el.addEventListener('pointerdown',res); SPEC.unres=()=>el.removeEventListener('pointerdown',res); }
+    let specUnres=null;
+    if(SPEC){ const res=()=>{ try{ if(AU && AU.ac.state==='suspended') AU.ac.resume().catch(()=>{}); }catch(e){} }; el.addEventListener('pointerdown',res); specUnres=()=>el.removeEventListener('pointerdown',res); }
     AU && AU.oneShot('start',0.9);
     // ---- girdi ----
     const keys={};
@@ -3498,7 +3499,7 @@ function startFlight(opts){
       cancelAnimationFrame(raf); el.classList.remove('on'); card.classList.remove('on');
       removeEventListener('keydown',kd,true); removeEventListener('keyup',ku,true); removeEventListener('deviceorientation',onOri); el.removeEventListener('wheel',onWheel);
       hc.removeEventListener('pointerdown',pd); hc.removeEventListener('pointermove',pm); hc.removeEventListener('pointerup',pu); hc.removeEventListener('pointercancel',pu);
-      if(SPEC&&SPEC.unres) SPEC.unres(); AU&&AU.close(); if(unfeed) try{ unfeed(); }catch(e){}
+      if(specUnres) specUnres(); AU&&AU.close(); if(unfeed) try{ unfeed(); }catch(e){}
       removeEventListener('beforeunload',onLeave);
       exitFlightFullscreen();
       const lose=gl.getExtension('WEBGL_lose_context'); lose&&lose.loseContext();
@@ -3649,7 +3650,7 @@ function startFlight(opts){
       document.getElementById('flThrLbl').textContent='GAZ '+Math.round(st.thr*100)+'%';
       // joystick
       if(stick.id!==null){ c.fillStyle='rgba(255,248,236,.18)'; c.strokeStyle='rgba(255,255,255,.7)'; c.lineWidth=3; c.beginPath(); c.arc(stick.ox,stick.oy,70,0,7); c.fill(); c.stroke(); c.fillStyle='rgba(255,248,236,.9)'; c.beginPath(); c.arc(stick.ox+stick.x*70,stick.oy+stick.y*70,26,0,7); c.fill(); }
-      else if(coarse && FLSET.ctrl!=='tilt'){ c.strokeStyle='rgba(255,255,255,.4)'; c.lineWidth=2; c.beginPath(); c.arc(VW-110,VH-130,60,0,7); c.stroke(); c.fillStyle='rgba(255,255,255,.55)'; c.font='bold 12px system-ui'; c.textAlign='center'; c.fillText('Kumanda',VW-110,VH-126); }
+      else if(coarse && !SPEC && FLSET.ctrl!=='tilt'){ c.strokeStyle='rgba(255,255,255,.4)'; c.lineWidth=2; c.beginPath(); c.arc(VW-110,VH-130,60,0,7); c.stroke(); c.fillStyle='rgba(255,255,255,.55)'; c.font='bold 12px system-ui'; c.textAlign='center'; c.fillText('Kumanda',VW-110,VH-126); }
       // uyarılar
       const W2=[];
       if(st.stallWarn) W2.push(['STALL! Burnu indir',1]);
