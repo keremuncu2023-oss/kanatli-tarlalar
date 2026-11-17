@@ -182,6 +182,8 @@ const CITIES = {
   ankara:  {ad:'Ankara', e:'Ankara\'ya', de:'Ankara\'da',  km:350, kiyi:false, carp:1.6, talep:'bugday',  satar:{boru:70, gubre:20},         yakitCarp:1.1},
   antalya: {ad:'Antalya', e:'Antalya\'ya', de:'Antalya\'da', km:480, kiyi:true,  carp:1.8, talep:'cilek',   satar:{boru:65, tel:38},           yakitCarp:1.25},
 };
+const CITY_KM={"bursa-izmir": 260, "bursa-ankara": 320, "bursa-antalya": 390, "izmir-ankara": 520, "izmir-antalya": 360, "ankara-antalya": 390};
+function legKm(a,b){ if(a===b) return 0; if(a==='koy') return CITIES[b].km; if(b==='koy') return CITIES[a].km; return CITY_KM[a+'-'+b]||CITY_KM[b+'-'+a]||300; }
 const FUEL_PRICE = 1.5;
 const COLORS = ['#e2504c','#3d7fe0','#f2b134','#8e5bd8','#2fa86a','#ec6fb0','#20b5c4','#7a5233'];
 const MAX_W = 10, MAX_H = 8, MONEY_MAX = 6; // 6x6 sonrası şehir malzemesi gerekir
@@ -362,7 +364,7 @@ function serialize(){
   return {name:S.name, color:S.color, money:Math.max(0,Math.round(me.money)),
     lot:f0.lot, w:f0.w, h:f0.h, plots:f0.plots, depo:f0.depo||null, ek:me.farms.slice(1),
     seeds:me.seeds, crops:me.crops, items:me.items, plane:me.plane||null, trip:me.trip||null,
-    animals:me.animals, anT:me.anT, barn:me.barn||1, rod:me.rod||1, vehicles:me.vehicles||[], loan:me.loan||null, updated:Date.now()};
+    animals:me.animals, anT:me.anT, barn:me.barn||1, rod:me.rod||1, vehicles:me.vehicles||[], loan:me.loan||null, ptrade:me.ptrade||null, updated:Date.now()};
 }
 function saveNow(){
   clearTimeout(saveTimer);
@@ -844,8 +846,9 @@ function setVillageUI(on){ for(const id of ['topL','topR','hotbar','action','cha
 async function depart(toKey){
   const me=S.me, pl=me.plane, PD=PLANES[pl.model];
   const fromKey = (me.trip && me.trip.at) || 'koy';
-  const km = toKey==='koy' ? CITIES[fromKey].km : CITIES[toKey].km;
+  const km = legKm(fromKey,toKey);
   if(pl.cond.engine<=0){ toast('Motor çalışmıyor'); return; }
+  if(km>PD.menzil){ toast('Menzil yetmez'); return; }
   if(pl.fuel < km*PD.perKm*1.05){ toast('Yakıt yetmez'); return; }
   let cargo;
   if(fromKey==='koy'){
@@ -938,7 +941,7 @@ function openCityAirport(){
   const me=S.me, C=CITIES[M.id], cg=me.trip.cargo;
   if(me.trip.pax || !me.plane){
     let h=`<p class="muted" style="margin:0 0 6px">Paran: <b>💰 ${fmtMoney(me.money)}</b> · Bavul: <b>${cargoCount(cg)}/${tripCap()}</b></p><p>Buraya yolcu olarak geldin. Uçağın köyde.</p>`;
-    h+=rideHTML(['koy']);
+    h+=rideHTML(['koy',...Object.keys(CITIES).filter(k=>k!==M.id)]);
     h+=`<button class="btn primary" style="width:100%;margin-top:10px;height:50px" data-bus>🚌 Otobüsle köye dön (💰150)</button>`;
     openPanel('cair','✈️ '+C.ad+' Havalimanı',h); return;
   }
@@ -948,10 +951,13 @@ function openCityAirport(){
   const price=FUEL_PRICE*C.yakitCarp, need=PD.yakit-pl.fuel;
   h+=`<div class="row"><div class="grow">⛽ ${Math.round(pl.fuel)} / ${PD.yakit} L <span class="muted">(litresi 💰${price.toFixed(2)})</span></div>${need>0.5?`<button class="btn" data-crefuel>Doldur 💰${fmtMoney(Math.ceil(need*price))}</button>`:''}</div>`;
   if(pl.cond.engine<35) h+=`<div class="row"><div class="grow">Acil motor tamiri (→35)<div class="muted">Asıl bakım köy hangarında yapılır</div></div><button class="btn" data-crepair>💰${fmtMoney(Math.round((35-pl.cond.engine)*PD.tamir*2.5))}</button></div>`;
-  const fuelNeed=Math.ceil(C.km*PD.perKm*1.05), canFly=pl.fuel>=fuelNeed && pl.cond.engine>0;
-  h+=paxPickHTML('koy');
-  h+=`<button class="btn primary" style="width:100%;margin-top:12px;height:54px" data-flyhome ${canFly?'':'disabled'}>✈️ Köye dön (${C.km} km)</button>`;
-  if(!canFly) h+=`<p class="muted" style="text-align:center">${pl.cond.engine<=0?'Motor çalışmıyor — acil tamir yap':'Dönüş için ~'+fuelNeed+' L yakıt lazım'}</p>`;
+  h+=`<p style="margin:12px 0 2px"><b>🛫 Nereye?</b></p>`;
+  if(pl.cond.engine<=0) h+=`<p class="muted">🛑 Motor çalışmıyor — acil tamir yap.</p>`;
+  for(const dest of ['koy',...Object.keys(CITIES).filter(k=>k!==M.id)]){
+    const km=legKm(M.id,dest), fuelNeed=Math.ceil(km*PD.perKm*1.05), range=km<=PD.menzil, fuel=pl.fuel>=fuelNeed, ok=range&&fuel&&pl.cond.engine>0;
+    const why=!range?'🔒 Menzil yetmez ('+PD.menzil+' km)':(!fuel?`⛽ ${fuelNeed} L lazım (${Math.round(pl.fuel)} var)`:`⛽ ~${fuelNeed} L yakar`);
+    h+=`<div class="row"><span class="em">${dest==='koy'?'🏠':'🏙️'}</span><div class="grow"><b>${dest==='koy'?'Köy':CITIES[dest].ad}</b> <span class="muted">${km} km</span><div class="muted">${why}</div></div><button class="btn ${ok?'primary':''}" data-fly="${dest}" ${ok?'':'disabled'}>Kalkış</button></div>`+paxPickHTML(dest);
+  }
   openPanel('cair','✈️ '+C.ad+' Havalimanı',h);
 }
 function citySell(id){
@@ -1889,9 +1895,9 @@ function rodShopHTML(){
 S.rides={}; S.paxSel={}; S.rideReq=null; S.paxFlight=null;
 const PAX_CAP={c150:1, c172:3, kingair:7};
 // bilet: mesafeye göre, küçük bir ücret (köy↔Bursa 50 … köy↔Antalya 240)
-function rideFare(from,to){ const c=CITIES[to==='koy'?from:to]; if(!c) return 0; return Math.max(30, Math.round(c.km*0.5/10)*10); }
+function rideFare(from,to){ const km=legKm(from,to); if(!km) return 0; return Math.max(30, Math.round(km*0.5/10)*10); }
 function extrasOnline(){
-  FB.onValue(FB.ref(FB.db,'rides'), s=>{ S.rides=s.val()||{}; const k=panel.dataset.kind; if(k==='hangar'&&hangarTab==='uc') openHangar(); if(k==='cair') openCityAirport(); });
+  FB.onValue(FB.ref(FB.db,'rides'), s=>{ S.rides=s.val()||{}; const mr=S.rides[S.uid]; if(mr && !S.rideReq && !S.paxFlight && mr.from===M.id) S.rideReq={to:mr.to, t0:mr.t||Date.now()}; const k=panel.dataset.kind; if(k==='hangar'&&hangarTab==='uc') openHangar(); if(k==='cair') openCityAirport(); });
   const onF=s=>{ const f=s.val(); if(!f||!f.pax||!f.pax[S.uid]||f.end) return; if(S.paxFlight||S.mode==='flight') return; if(!S.rideReq || (f.t||0) < (S.rideReq.t0||0)-60000) return; startPaxFlight(s.key,f); };
   FB.onChildAdded(FB.ref(FB.db,'flights'), onF); FB.onChildChanged(FB.ref(FB.db,'flights'), onF);
 }
@@ -1901,6 +1907,7 @@ function requestRide(to){
   S.rideReq={to, t0:Date.now()};
   FB.set(FB.ref(FB.db,'rides/'+S.uid), {from:M.id, to, name:S.name, t:FB.serverTimestamp()});
   toast('🧳 Yolcu talebin gönderildi. '+(to==='koy'?'Köye':CITIES[to].e)+' giden bir pilot seni alabilir.');
+  const k=panel.dataset.kind; if(k==='hangar') openHangar(); if(k==='cair') openCityAirport();
 }
 function cancelRide(){ S.rideReq=null; if(S.online) FB.remove(FB.ref(FB.db,'rides/'+S.uid)); toast('Yolcu talebi iptal'); const k=panel.dataset.kind; if(k==='hangar') openHangar(); if(k==='cair') openCityAirport(); }
 function ridersFor(dest){
@@ -2112,6 +2119,7 @@ function openPlayerMenu(uid){
 S.trade=null;        // {id, other, oname, d, off, applied}
 let tradeTab='p', tradeInvSeen={};
 const tradeIdOf=(a,b)=>[a,b].sort().join('__');
+const isFinal = d => !!d && d.st!=='cancel' && d.st!=='red' && (d.st==='final' || ((d.ok||{})[d.a]===d.v && (d.ok||{})[d.b]===d.v));
 const tRef = id => FB.ref(FB.db,'trades/'+id);
 const offerOf = (d,uid)=> (d && d.o && d.o[uid]) || {};
 const objN = o => Object.values(o||{}).reduce((a,b)=>a+(+b||0),0);
@@ -2119,6 +2127,7 @@ function emptyOffer(o){ return !(o.p>0) && !objN(o.s) && !objN(o.c) && !objN(o.i
 
 function tradeInit(){
   if(!S.online) return;
+  setTimeout(resolvePending, 1500);
   FB.onValue(FB.ref(FB.db,'tradeInv/'+S.uid), s=>{
     const inv=s.val()||{};
     for(const [from,v] of Object.entries(inv)){
@@ -2173,7 +2182,9 @@ function endTrade(msg){
 function cancelTrade(silent){
   const tr=S.trade; if(!tr) return;
   const id=tr.id;
-  FB.runTransaction(tRef(id), cur=>{ if(!cur) return cur; const ok=cur.ok||{}; if(ok[cur.a]===cur.v && ok[cur.b]===cur.v) return; cur.st='cancel'; return cur; }).catch(()=>{});
+  if(isFinal(tr.d)){ applyTrade(tr.d); return; }
+  FB.runTransaction(tRef(id), cur=>{ if(!cur) return cur; if(isFinal(cur)) return; cur.st='cancel'; return cur; })
+    .then(r=>{ const v=r.snapshot && r.snapshot.val(); if(!r.committed && isFinal(v)) applyTradeData(v); else if(S.me.ptrade===id){ S.me.ptrade=null; saveSoon(); } }).catch(()=>{});
   FB.remove(FB.ref(FB.db,'tradeInv/'+tr.other+'/'+S.uid)).catch(()=>{});
   endTrade(silent?'':'Takas iptal edildi');
 }
@@ -2182,9 +2193,8 @@ function onTradeData(d){
   if(!d){ endTrade(); return; }
   tr.d=d;
   if(d.st==='red'){ endTrade('🤝 '+tr.oname+' takası '+(d.why==='meşgul'?'şu an yapamıyor (meşgul)':'reddetti')); return; }
-  if(d.st==='cancel'){ endTrade('🤝 '+tr.oname+' takası iptal etti'); return; }
-  const ok=d.ok||{};
-  if(!tr.applied && ok[d.a]===d.v && ok[d.b]===d.v){ applyTrade(d); return; }
+  if(d.st==='cancel'){ if(S.me.ptrade===tr.id){ S.me.ptrade=null; saveSoon(); } endTrade('🤝 '+tr.oname+' takası iptal etti'); return; }
+  if(isFinal(d)){ if(!tr.applied && !(d.done||{})[S.uid]) applyTrade(d); else endTrade(); return; }
   if(panel.dataset.kind==='trade' || panel.dataset.kind==='pmenu' || !panel.classList.contains('on')) openTrade();
 }
 
@@ -2240,12 +2250,21 @@ function confirmTrade(){
     if(cargoCount(me.trip.cargo)+inN-outN>tripCap()){ toast((me.trip.pax?'Bavulunda':'Uçağında')+' yer yok ('+tripCap()+')'); return; }
   }
   const v=d.v;
-  FB.runTransaction(tRef(tr.id), cur=>{ if(!cur || cur.st!=='open' || cur.v!==v) return; cur.ok=cur.ok||{}; cur.ok[S.uid]=v; return cur; })
-    .then(r=>{ if(!r.committed) toast('Teklif değişti, tekrar bak'); }).catch(()=>{});
+  S.me.ptrade=tr.id; saveNow();
+  const other=tr.other;
+  FB.runTransaction(tRef(tr.id), cur=>{ if(!cur || cur.st!=='open' || cur.v!==v) return; cur.ok=cur.ok||{}; cur.ok[S.uid]=v; if(cur.ok[other]===v) cur.st='final'; return cur; })
+    .then(r=>{ if(!r.committed){ const cur=r.snapshot&&r.snapshot.val(); if(isFinal(cur)) onTradeData(cur); else toast('Teklif değişti, tekrar bak'); } }).catch(()=>{});
 }
 function applyTrade(d){
-  const tr=S.trade; tr.applied=true;
-  const me=S.me, mine=offerOf(d,S.uid), his=offerOf(d,tr.other);
+  const tr=S.trade; if(tr) tr.applied=true;
+  applyTradeData(d);
+}
+function applyTradeData(d){
+  const me=S.me, id=tradeIdOf(d.a,d.b);
+  if((d.done||{})[S.uid] || me.ptrade!==id){ if(S.trade) endTrade(); return; }   // zaten uygulanmış
+  me.ptrade=null;
+  const other = d.a===S.uid ? d.b : d.a;
+  const mine=offerOf(d,S.uid), his=offerOf(d,other);
   const ridden = S.ride!=null ? me.vehicles[S.ride] : null;
   // ver
   me.money=Math.max(0, me.money-(mine.p||0));
@@ -2259,9 +2278,10 @@ function applyTrade(d){
   if(his.pl) me.plane={...his.pl, cond:{...his.pl.cond}};
   if(ridden){ const i=me.vehicles.indexOf(ridden); S.ride=i>=0?i:null; }
   saveNow(); renderHUD();
-  FB.update(tRef(tr.id), {['done/'+S.uid]:true}).catch(()=>{});
+  FB.update(tRef(id), {['done/'+S.uid]:true, st:'final'}).catch(()=>{});
   const got=offerText(his);
-  endTrade('🤝 Takas tamam! '+(got?'Aldın: '+got:''));
+  if(S.trade) endTrade(); 
+  toast('🤝 Takas tamam! '+(got?'Aldın: '+got:''));
 }
 function offerText(o){
   const parts=[];
@@ -2325,8 +2345,21 @@ function openTrade(){
   openPanel('trade','🤝 Takas: '+tr.oname,h);
   const mi=$('tMoneyIn'); if(mi){ mi.value=keepMoney; mi.addEventListener('keydown',e=>{ if(e.key==='Enter'){ offerMoney(+mi.value.replace(/\D/g,'')||0); } e.stopPropagation(); }); }
 }
+let pendT=0;
+function resolvePending(){
+  const id=S.me && S.me.ptrade; if(!id || !S.online || S.trade) return;
+  FB.get(tRef(id)).then(s=>{
+    const d=s.val();
+    if(isFinal(d)) applyTradeData(d);
+    else if(!d || d.st!=='open'){ S.me.ptrade=null; saveSoon(); }
+    else FB.runTransaction(tRef(id), cur=>{ if(!cur) return cur; if(isFinal(cur)) return; cur.st='cancel'; return cur; })
+      .then(r=>{ const v=r.snapshot&&r.snapshot.val(); if(!r.committed && isFinal(v)) applyTradeData(v); else { S.me.ptrade=null; saveSoon(); } });
+  }).catch(()=>{});
+}
 function tradeWatch(){
-  const tr=S.trade; if(!tr) return;
+  if(!S.trade){ if(S.me && S.me.ptrade && ++pendT%3===1) resolvePending(); return; }
+  const tr=S.trade;
+  FB.get(tRef(tr.id)).then(s=>{ if(S.trade===tr) onTradeData(s.val()); }).catch(()=>{});
   const d=tr.d, o=S.others.get(tr.other);
   const joined = d && (d.j||{})[tr.other];
   if(!o && joined){ cancelTrade(true); toast('🤝 '+tr.oname+' oyundan çıktı, takas iptal'); return; }
@@ -2969,7 +3002,8 @@ function startFlight(opts){
     const W=buildWorld(R,seed,O,D,!!opts.to.coastal);
     const PL=buildPlane(R,opts.model,opts.color||'#e2504c');
     // rüzgâr
-    const windFrom=rnd(3)*Math.PI*2, windSpd=(rnd(4)*7)*(opts.windMul??1);
+    // rüzgâr hep önden: iki pistin ortalama yönüne göre ±50° (tam karşı / sağ-ön / sol-ön), arkadan asla
+    const windFrom=(((dHdg/2+(rnd(3)-0.5)*100*D2R)%(Math.PI*2))+Math.PI*2)%(Math.PI*2), windSpd=(rnd(4)*7)*(opts.windMul??1);
     const windV=[-Math.sin(windFrom)*windSpd,0,Math.cos(windFrom)*windSpd];
     // durum
     const st={
@@ -2987,7 +3021,7 @@ function startFlight(opts){
     if(SPEC && opts.feed){ unfeed = opts.feed(v=>{ if(v.s && (!snaps.length || snaps[snaps.length-1].k!==v.s.k)){ snaps.push({...v.s, rt:performance.now()}); if(snaps.length>40) snaps.shift(); lastSnapAt=performance.now(); } if(v.end && !specEnd) specEnd=v.end; }); }
     let lastB=0, bk=0;
     const AU = makeAudio(opts.model);
-    if(SPEC){ const res=()=>{ try{ AU&&AU.ac.resume(); }catch(e){} }; el.addEventListener('pointerdown',res); }
+    if(SPEC){ const res=()=>{ try{ if(AU && AU.ac.state==='suspended') AU.ac.resume().catch(()=>{}); }catch(e){} }; el.addEventListener('pointerdown',res); SPEC.unres=()=>el.removeEventListener('pointerdown',res); }
     AU && AU.oneShot('start',0.9);
     // ---- girdi ----
     const keys={};
@@ -3295,7 +3329,7 @@ function startFlight(opts){
       cancelAnimationFrame(raf); el.classList.remove('on'); card.classList.remove('on');
       removeEventListener('keydown',kd,true); removeEventListener('keyup',ku,true); removeEventListener('deviceorientation',onOri); el.removeEventListener('wheel',onWheel);
       hc.removeEventListener('pointerdown',pd); hc.removeEventListener('pointermove',pm); hc.removeEventListener('pointerup',pu); hc.removeEventListener('pointercancel',pu);
-      AU&&AU.close(); if(unfeed) try{ unfeed(); }catch(e){}
+      if(SPEC&&SPEC.unres) SPEC.unres(); AU&&AU.close(); if(unfeed) try{ unfeed(); }catch(e){}
       removeEventListener('beforeunload',onLeave);
       exitFlightFullscreen();
       const lose=gl.getExtension('WEBGL_lose_context'); lose&&lose.loseContext();
