@@ -2814,7 +2814,7 @@ function drawMachines(n, f, mine, time){
 }
 
 /* sürüm etiketi — hangi sürümün yüklü olduğunu görmek için */
-(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 18.11 00:13'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
+(()=>{ const d=document.createElement('div'); d.id='verTag'; d.textContent='sürüm 18.11 08:16'; d.style.cssText='position:fixed;left:6px;bottom:4px;font:10px system-ui;color:rgba(255,255,255,.55);z-index:5;pointer-events:none;text-shadow:0 1px 2px #000'; document.body.appendChild(d); })();
 
 /* ---------- Araçlarım: üst menüden araçları yanına ışınla ---------- */
 (()=>{
@@ -3962,6 +3962,9 @@ function startFlight(opts){
       if(!satT && SAT.state==='ok') satT=satTexture(gl);
       { const pe=document.getElementById('flPit'); if(pitMode()){ const Lp=pitLayout(VW,VH); const k=[Lp.s,Lp.left,Lp.top].map(v=>v.toFixed(2)).join(); if(k!==pitKey||pe.style.display==='none'){ pitKey=k; if(pe.src!==PIT.img.src) pe.src=PIT.img.src; pe.style.display='block'; pe.style.left=Lp.left+'px'; pe.style.top=Lp.top+'px'; pe.style.width=(PIT.W*Lp.s)+'px'; pe.style.height=(PIT.H*Lp.s)+'px'; } } else if(pe.style.display!=='none'){ pe.style.display='none'; pitKey=''; } }
       gl.viewport(0,0,glc.width,glc.height);
+      // her karede GL durumunu sıfırla: bir önceki karede yarıda kalan bir çizim derinlik yazmayı kapalı bırakırsa
+      // derinlik tamponu temizlenmez ve zemin hiç çizilmez (gökyüzü rengi görünür)
+      gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); gl.disable(gl.BLEND); gl.disable(gl.POLYGON_OFFSET_FILL);
       gl.clearColor(W.fogC[0],W.fogC[1],W.fogC[2],1); gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
       const Rm=rotM(), up=[Rm[4],Rm[5],Rm[6]], fwd=[-Rm[8],-Rm[9],-Rm[10]];
       let eye,tgt,cup=[0,1,0],near=1.0,fov=62;
@@ -4138,7 +4141,9 @@ function startFlight(opts){
       const rpmT = st.engineOn ? 0.22+0.78*st.thr : Math.min(0.25,vlen(st.vel)/90);
       st.rpm=lerp(st.rpm,rpmT,0.05); st.propA+= st.rpm*dt*60;
       AU && AU.set(st.paused||st.done?0:st.rpm*(st.rough&&st.engineOn?(0.85+0.15*Math.sin(st.t*9)):1), st.paused?0:vlen(st.vel), st.stallWarn&&!st.paused&&!st.done, st.t, st.rough&&st.engineOn&&!st.paused);
-      camDt=dt; render(); hud();
+      camDt=dt;
+      try{ render(); }catch(e){ if(!st.gfxErr){ st.gfxErr=1; console.error(e); st.msgs.push({t:'Grafik hatası: '+String(e.message||e).slice(0,60),until:st.t+6}); } }
+      hud();
       raf=requestAnimationFrame(frame);
     }
     raf=requestAnimationFrame(frame);
